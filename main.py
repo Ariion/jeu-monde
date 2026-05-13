@@ -4,9 +4,8 @@ import pygame
 from config import SCREEN_W, SCREEN_H, FPS
 from terrain import generate_terrain
 from simulation import Simulation
-from renderer import Camera, render
+from renderer import Camera, render, find_nearest_entity
 
-# Detect browser environment (Pygbag sets platform to "emscripten")
 IS_WEB = sys.platform == "emscripten"
 
 
@@ -26,11 +25,7 @@ def make_fonts():
 
 async def main():
     pygame.init()
-
-    flags = 0
-    if IS_WEB:
-        # Pygbag: use the canvas size provided by the HTML page
-        flags = pygame.SCALED
+    flags  = pygame.SCALED if IS_WEB else 0
     screen = pygame.display.set_mode((SCREEN_W, SCREEN_H), flags)
     pygame.display.set_caption("Jeu Monde — L'Évolution de l'Humanité")
     clock  = pygame.time.Clock()
@@ -39,16 +34,16 @@ async def main():
     # Loading screen
     screen.fill((10, 8, 5))
     msg = fonts['big'].render("Génération du monde…", True, (200, 180, 120))
-    screen.blit(msg, (SCREEN_W // 2 - msg.get_width() // 2,
-                      SCREEN_H // 2 - msg.get_height() // 2))
+    screen.blit(msg, (SCREEN_W//2 - msg.get_width()//2,
+                      SCREEN_H//2 - msg.get_height()//2))
     pygame.display.flip()
-    await asyncio.sleep(0)   # yield so browser can paint the loading screen
+    await asyncio.sleep(0)
 
     tiles, _, _ = generate_terrain(seed=42)
-    # Web: epoch mode (real-time persistent world). Desktop: free-play.
     sim    = Simulation(tiles, epoch=IS_WEB)
     camera = Camera()
     tick   = 0.0
+    selected_entity = None   # currently clicked entity
 
     running = True
     while running:
@@ -58,9 +53,13 @@ async def main():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE and not IS_WEB:
-                    running = False
+                if event.key == pygame.K_ESCAPE:
+                    if selected_entity:
+                        selected_entity = None  # deselect first
+                    elif not IS_WEB:
+                        running = False
                 elif event.key == pygame.K_SPACE:
                     sim.toggle_pause()
                 elif event.key in (pygame.K_EQUALS, pygame.K_PLUS,
@@ -70,19 +69,43 @@ async def main():
                                    pygame.K_PAGEDOWN):
                     sim.slow_down()
 
+            # ── mouse wheel → zoom ──
+            elif event.type == pygame.MOUSEWHEEL:
+                mx, my = pygame.mouse.get_pos()
+                if event.y > 0:
+                    camera.zoom_by(1.18, mx, my)
+                else:
+                    camera.zoom_by(1 / 1.18, mx, my)
+
+            # ── left click → select entity ──
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:
+                    mx, my = event.pos
+                    hit = find_nearest_entity(
+                        mx, my,
+                        sim.entities,
+                        camera.x, camera.y, camera.zoom
+                    )
+                    selected_entity = hit   # None if nothing found
+                elif event.button == 3:
+                    selected_entity = None  # right click deselects
+
+        # ── keyboard camera pan ──
         keys = pygame.key.get_pressed()
         dx = dy = 0
-        if keys[pygame.K_RIGHT] or keys[pygame.K_d]:                    dx += 1
+        if keys[pygame.K_RIGHT] or keys[pygame.K_d]:                     dx += 1
         if keys[pygame.K_LEFT]  or keys[pygame.K_a] or keys[pygame.K_q]: dx -= 1
-        if keys[pygame.K_DOWN]  or keys[pygame.K_s]:                    dy += 1
+        if keys[pygame.K_DOWN]  or keys[pygame.K_s]:                     dy += 1
         if keys[pygame.K_UP]    or keys[pygame.K_z] or keys[pygame.K_w]: dy -= 1
         camera.move(dx, dy, dt)
 
-        sim.update(dt)
-        render(screen, sim, tiles, camera, fonts, tick)
-        pygame.display.flip()
+        # If entity is selected, keep camera gently following it (optional)
+        # (not forced — user can pan away freely)
 
-        await asyncio.sleep(0)   # required by Pygbag / browser event loop
+        sim.update(dt)
+        render(screen, sim, tiles, camera, fonts, tick, selected_entity)
+        pygame.display.flip()
+        await asyncio.sleep(0)
 
     pygame.quit()
     if not IS_WEB:
