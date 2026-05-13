@@ -6,7 +6,7 @@ from config import (WORLD_W, WORLD_H, ERAS, TIME_SPEEDS, DEFAULT_SPEED_IDX,
                     T_WATER, T_DEEP_WATER,
                     EPOCH_TIMESTAMP, YEARS_PER_SECOND)
 
-# ── Era-based name pools ───────────────────────────────────────────────────
+# ── Era-based name pools ──────────────────────────────────────────────────
 _NAMES = [
     ["Og","Urg","Muk","Kra","Brak","Tor","Wal","Shu","Gul","Uka","Dor","Bra","Rok","Mori","Wok"],
     ["Garoth","Temur","Alara","Brego","Nuri","Keld","Soma","Varg","Toba","Kira","Mela","Barla","Doru","Zena","Harg"],
@@ -20,89 +20,91 @@ _NAMES = [
     ["Aeon","Voxel","Nexus","Quasar","Synthos","Lyra","Helix","Pulsar","Axiom","Zenith","Photon","Iris","Nova","Vertex","Kron"],
 ]
 
-# ── Activity descriptions by era ──────────────────────────────────────────
-_HUNT_DESC = [
-    ["Traque un aurochs","Chasse un mammouth","Guette un cerf","Poursuit un bison"],
-    ["Chasse un sanglier","Traque un cerf","Tend un piège","Suit une piste"],
-    ["Part à la chasse","Suit une piste de gibier","Chasse avec une lance","Traque au loin"],
-    ["Chasse dans la forêt","Part au gibier","Guette au bord du lac","Surveille un terrier"],
-    ["Chasse le lièvre","Tend un collet","Part à la chasse au faucon","Traque un cerf"],
-    ["Chasse en forêt","Part à la vénerie","Traque le sanglier","Lève le gibier"],
-    ["Chasse au fusil","Guette le gibier","Bat les fourrés","Partait à la chasse"],
-    ["Pratique le tir sportif","Chasse légalement","Observe la faune","Photographie les animaux"],
-    ["Surveille des drones","Gère des bots écologiques","Optimise les écosystèmes","Simule des chasses"],
-    ["Interagit avec des hologrammes","Synchronise des IA","Explore la mémoire ancestrale","Rêve de nature"],
-]
-_DRINK_DESC = [
-    ["S'abreuve à la rivière","Boit dans un ruisseau","Se désaltère au lac","Cherche de l'eau fraîche"],
-    ["Remplit une outre","Boit à la source","Recueille l'eau de pluie","Va chercher de l'eau"],
-    ["Tire de l'eau du puits","Va au puits du village","Remplit une amphore","Porte l'eau au camp"],
-    ["Va au puits","Cherche une fontaine","Se rend aux thermes","Se désaltère en chemin"],
-    ["Va au puits du château","Cherche la fontaine","Boit à l'auberge","Remplit une gourde"],
-    ["Boit à la taverne","Va à la fontaine","Achète de l'eau","Se rafraîchit"],
-    ["Boit à la brasserie","Va au café","Se sert de la pompe","Boit un verre"],
-    ["Achète une bouteille","Va au café","Commande une boisson","Boit au robinet"],
-    ["Se recharge en électrolytes","Absorbe des nutriments","Hydrate ses nano-cellules","Boit à la fontaine"],
-    ["Absorbe de l'énergie","Se synchronise au réseau","Recharge ses implants","Fusionne avec le flux"],
-]
-_GATHER_DESC = [
-    ["Cueille des baies","Déterres des racines","Ramasse des herbes","Cherche des champignons"],
-    ["Récolte des plantes","Ramasse des graines","Prépare du silex","Cueille des fruits"],
-    ["Moissonne du grain","Cueille les olives","Récolte les dattes","Travaille aux champs"],
-    ["Travaille aux champs","Récolte les moissons","Ramasse des figues","Taille la vigne"],
-    ["Cultive son jardin","Récolte le blé","Cueille des herbes","Glane après la moisson"],
-    ["Jardine","Cueille des fleurs","Récolte les vignes","Prépare les épices"],
-    ["Travaille aux champs","Récolte le tabac","Ramasse du charbon","Coupe le bois"],
-    ["Fait les courses","Ramasse des déchets","Jardine en ville","Cultive en terrasse"],
-    ["Récolte des données","Cultive des bioalgues","Imprime des protéines","Synthétise des nutriments"],
-    ["Moissonne l'énergie stellaire","Récolte des minerais","Cultive des cristaux","Capte la lumière"],
-]
-_WANDER_DESC = [
-    ["Explore les environs","Erre sans but","Cherche un abri","Observe le paysage"],
-    ["Flâne dans la plaine","Explore la forêt","Cherche un campement","Erre au crépuscule"],
-    ["Déambule en ville","Cherche du travail","Se promène au marché","Explore les ruelles"],
-    ["Se promène au forum","Flâne au marché","Visite le temple","Contemple la ville"],
-    ["Déambule au bourg","Visite la foire","Prie en chemin","Erre sur les chemins"],
-    ["Contemple l'horizon","Se promène dans les jardins","Philosophe en marchant","Cherche l'inspiration"],
-    ["Se promène en ville","Flâne sur les boulevards","Lit en marchant","Observe les passants"],
-    ["Marche en écoutant","Flâne dans le parc","Consulte son téléphone","Se balade en ville"],
-    ["Simule des scenarios","Explore des mondes virtuels","Médite en réalité augmentée","Synchronise ses données"],
-    ["Navigue dans l'espace","Médite dans le vide","Contemple les étoiles","Dérive entre les mondes"],
+# ── Clan colours (hue offsets, applied in renderer) ───────────────────────
+CLAN_COLORS = [
+    (220, 120,  80),   # 0 rouge
+    ( 80, 180,  80),   # 1 vert
+    ( 80, 140, 220),   # 2 bleu
+    (220, 200,  60),   # 3 jaune
+    (180,  80, 200),   # 4 violet
+    ( 80, 210, 200),   # 5 cyan
 ]
 
-# Entity states
+# ── Entity states ─────────────────────────────────────────────────────────
 S_WANDER  = 0
 S_HUNT    = 1
 S_DRINK   = 2
 S_GATHER  = 3
-S_FLEE    = 4   # prey only
+S_REST    = 4
+S_FOLLOW  = 5   # children following parent
+S_FLEE    = 6   # prey fleeing
 
-_entity_counter = 0
+_ACTIVITY_LABELS = {
+    S_WANDER: "Explore",
+    S_HUNT:   "Chasse",
+    S_DRINK:  "Va boire",
+    S_GATHER: "Cueille",
+    S_REST:   "Se repose",
+    S_FOLLOW: "Suit le parent",
+}
+
+_eid_counter = 0
 
 
 class Entity:
-    __slots__ = ['x','y','vx','vy','age','wander_cd','state','target_x','target_y',
-                 'state_cd','is_prey','name','eid','activity_desc','vigor']
+    __slots__ = [
+        'x','y','vx','vy','age','wander_cd',
+        'state','target_x','target_y','state_cd',
+        'is_prey','name','eid','activity_desc','vigor',
+        # needs
+        'hunger','thirst','energy',
+        # identity
+        'clan_id','parent_eid',
+        # memory (learned locations)
+        'mem_water_x','mem_water_y',
+        'mem_food_x','mem_food_y',
+    ]
 
-    def __init__(self, x, y, era_idx=0, is_prey=False):
-        global _entity_counter
-        _entity_counter += 1
+    def __init__(self, x, y, era_idx=0, is_prey=False,
+                 clan_id=None, parent=None):
+        global _eid_counter
+        _eid_counter += 1
 
         self.x = float(x)
         self.y = float(y)
         angle  = random.uniform(0, math.tau)
-        self.vx = math.cos(angle)
-        self.vy = math.sin(angle)
-        self.age        = random.uniform(0, 14)
-        self.wander_cd  = random.uniform(0, 6)
+        self.vx, self.vy = math.cos(angle), math.sin(angle)
+        self.age        = 0.0
+        self.wander_cd  = random.uniform(0, 4)
         self.state      = S_WANDER
         self.target_x   = x
         self.target_y   = y
-        self.state_cd   = random.uniform(0, 5)
+        self.state_cd   = random.uniform(0, 3)
         self.is_prey    = is_prey
-        self.eid        = _entity_counter
-        self.vigor      = random.uniform(0.5, 1.0)
-        self.activity_desc = ""
+        self.eid        = _eid_counter
+        self.vigor      = random.uniform(0.6, 1.0)
+
+        # Needs — start at a random point so not everyone acts at once
+        self.hunger = random.uniform(0.1, 0.4)
+        self.thirst = random.uniform(0.1, 0.35)
+        self.energy = random.uniform(0.6, 1.0)
+
+        # Clan
+        self.clan_id   = clan_id if clan_id is not None else random.randint(0, len(CLAN_COLORS)-1)
+        self.parent_eid = parent.eid if parent else -1
+
+        # Memory: learn from parent or default to nearby
+        if parent and not is_prey:
+            jitter = 3.0
+            self.mem_water_x = max(0, min(WORLD_W-1, parent.mem_water_x + random.uniform(-jitter, jitter)))
+            self.mem_water_y = max(0, min(WORLD_H-1, parent.mem_water_y + random.uniform(-jitter, jitter)))
+            self.mem_food_x  = max(0, min(WORLD_W-1, parent.mem_food_x  + random.uniform(-jitter, jitter)))
+            self.mem_food_y  = max(0, min(WORLD_H-1, parent.mem_food_y  + random.uniform(-jitter, jitter)))
+        else:
+            self.mem_water_x = x + random.uniform(-8, 8)
+            self.mem_water_y = y + random.uniform(-8, 8)
+            self.mem_food_x  = x + random.uniform(-8, 8)
+            self.mem_food_y  = y + random.uniform(-8, 8)
 
         if is_prey:
             self.name = random.choice(["Cerf","Sanglier","Aurochs","Loup","Bison",
@@ -110,22 +112,43 @@ class Entity:
         else:
             pool = _NAMES[min(era_idx, len(_NAMES)-1)]
             self.name = random.choice(pool)
-            self._refresh_activity(era_idx)
 
-    def _refresh_activity(self, era_idx):
-        era_idx = min(era_idx, 9)
-        if self.state == S_HUNT:
-            self.activity_desc = random.choice(_HUNT_DESC[era_idx])
-        elif self.state == S_DRINK:
-            self.activity_desc = random.choice(_DRINK_DESC[era_idx])
-        elif self.state == S_GATHER:
-            self.activity_desc = random.choice(_GATHER_DESC[era_idx])
-        else:
-            self.activity_desc = random.choice(_WANDER_DESC[era_idx])
+        self.activity_desc = ""
+        self._refresh_activity(era_idx)
+
+    # ── computed properties ───────────────────────────────────────────────
 
     @property
     def health(self):
         return max(0.0, 1.0 - (self.age / 65.0) ** 1.8)
+
+    @property
+    def stage(self):
+        if self.age < 13: return 'child'
+        if self.age < 50: return 'adult'
+        return 'elder'
+
+    def _refresh_activity(self, era_idx):
+        ei = min(era_idx, 9)
+        labels = {
+            S_WANDER: _WANDER_DESC[ei],
+            S_HUNT:   _HUNT_DESC[ei],
+            S_DRINK:  _DRINK_DESC[ei],
+            S_GATHER: _GATHER_DESC[ei],
+            S_REST:   _REST_DESC[ei],
+            S_FOLLOW: ["Suit ses aînés", "Reste près de sa famille", "Apprend à marcher"],
+        }
+        pool = labels.get(self.state, _WANDER_DESC[ei])
+        self.activity_desc = random.choice(pool)
+
+    def needs_summary(self):
+        """Short string for UI display."""
+        parts = []
+        if self.hunger > 0.6: parts.append("affamé")
+        if self.thirst > 0.55: parts.append("assoiffé")
+        if self.energy < 0.25: parts.append("épuisé")
+        if not parts: parts.append("en bonne santé")
+        return ", ".join(parts)
 
 
 class Settlement:
@@ -137,14 +160,17 @@ class Settlement:
         self.level = 0
 
 
+# ── Simulation ────────────────────────────────────────────────────────────
+
 class Simulation:
     def __init__(self, tiles, epoch=False):
         self.tiles   = tiles
         self.epoch   = epoch
         self.paused  = False
-        self.speed_idx     = DEFAULT_SPEED_IDX
-        self._era_idx      = 0
-        self._settle_cd    = 0.0
+        self.speed_idx  = DEFAULT_SPEED_IDX
+        self._era_idx   = 0
+        self._settle_cd = 0.0
+
         self.entities    = []
         self.prey        = []
         self.settlements = []
@@ -153,9 +179,15 @@ class Simulation:
 
         self._walkable   = [(x,y) for x in range(WORLD_W) for y in range(WORLD_H)
                             if TILE_WALKABLE.get(tiles[x][y], False)]
-        self._water_adj  = self._find_water_adjacent()
+        water_set        = {(x,y) for x in range(WORLD_W) for y in range(WORLD_H)
+                            if tiles[x][y] in (T_WATER, T_DEEP_WATER)}
+        self._water_adj  = [(x,y) for x,y in self._walkable
+                            if any((x+dx,y+dy) in water_set
+                                   for dx,dy in ((-1,0),(1,0),(0,-1),(0,1)))]
         self._food_tiles = [(x,y) for x,y in self._walkable
                             if tiles[x][y] in (T_FOREST, T_GRASS)]
+        # Spatial buckets for fast neighbour lookup
+        self._bucket_size = 8
 
         if epoch:
             self._site_schedule = _precompute_sites(tiles)
@@ -164,146 +196,279 @@ class Simulation:
         else:
             self.year = 0.0
             self._spawn_initial()
-            self._spawn_prey(20)
+            self._spawn_prey(18)
 
     # ── public ────────────────────────────────────────────────────────────
 
     def get_era(self):
         idx = 0
         for i, era in enumerate(ERAS):
-            if self.year >= era[0]:
-                idx = i
+            if self.year >= era[0]: idx = i
         return idx, ERAS[idx]
 
-    def population(self):
-        return len(self.entities)
-
+    def population(self):  return len(self.entities)
     def toggle_pause(self):
-        if not self.epoch:
-            self.paused = not self.paused
-
+        if not self.epoch: self.paused = not self.paused
     def speed_up(self):
-        if not self.epoch:
-            self.speed_idx = min(len(TIME_SPEEDS)-1, self.speed_idx+1)
-
+        if not self.epoch: self.speed_idx = min(len(TIME_SPEEDS)-1, self.speed_idx+1)
     def slow_down(self):
-        if not self.epoch:
-            self.speed_idx = max(1, self.speed_idx-1)
+        if not self.epoch: self.speed_idx = max(1, self.speed_idx-1)
 
     def update(self, dt):
         if self.epoch:
             new_year = _epoch_year()
-            dy_game  = new_year - self.year
+            dy = new_year - self.year
             self._animate_all(dt)
-            if dy_game > 0:
+            if dy > 0:
                 self.year = new_year
-                self._epoch_update(dy_game)
+                self._epoch_update(dy)
         else:
-            if self.paused:
-                return
-            dy_game = dt * TIME_SPEEDS[self.speed_idx]
-            self.year += dy_game
-            self._update_entities(dy_game)
-            self._update_prey(dy_game)
-            self._update_reproduction(dy_game)
-            self._update_settlements(dy_game)
+            if self.paused: return
+            dy = dt * TIME_SPEEDS[self.speed_idx]
+            self.year += dy
+            self._sim_step(dy)
             self._check_era_transition()
-            self._settle_cd = max(0.0, self._settle_cd - dy_game)
+            self._settle_cd = max(0.0, self._settle_cd - dy)
 
         self._active_events = [
-            (t, r-dt) for t,r in self._active_events if r-dt > 0
-        ]
+            (t, r-dt) for t,r in self._active_events if r-dt > 0]
 
-    # ── real-time animation ────────────────────────────────────────────────
+    # ── internal step ────────────────────────────────────────────────────
+
+    def _sim_step(self, dy):
+        era_idx  = self._era_idx
+        speed    = 2.5 + era_idx * 0.25
+        move_d   = dy * speed
+        tiles    = self.tiles
+        dead     = []
+
+        # Build a coarse spatial grid of entities for child→adult following
+        parents  = {e.eid: e for e in self.entities}
+
+        for e in self.entities:
+            e.age += dy
+            self._update_needs(e, dy)
+            self._choose_goal(e, era_idx, parents)
+            self._move_entity(e, move_d, tiles, era_idx)
+            self._satisfy_needs(e, tiles)
+            if e.age > 55 + random.uniform(-8, 15) or e.hunger > 1.0 or e.thirst > 1.2:
+                dead.append(e)
+
+        for e in dead:
+            try: self.entities.remove(e)
+            except ValueError: pass
+
+        for p in self.prey:
+            self._move_prey(p, move_d * 0.9, tiles)
+
+        self._update_reproduction(dy)
+        self._update_settlements(dy)
+
+        # Replenish prey
+        era_idx  = self._era_idx
+        target   = max(5, 28 - era_idx * 3)
+        if len(self.prey) < target:
+            self._spawn_prey(1)
 
     def _animate_all(self, dt):
-        era_idx = self._era_idx
-        speed   = 2.5 + era_idx * 0.25
-        move_d  = dt * speed
-        tiles   = self.tiles
+        """Epoch mode: animate at real-time speed."""
+        era_idx  = self._era_idx
+        speed    = 2.5 + era_idx * 0.25
+        move_d   = dt * speed
+        tiles    = self.tiles
+        parents  = {e.eid: e for e in self.entities}
+
         for e in self.entities:
-            self._move_entity(e, move_d, tiles, era_idx, hunt_prey=True)
+            self._update_needs(e, dt * 0.3)   # needs grow slowly in epoch
+            self._choose_goal(e, era_idx, parents)
+            self._move_entity(e, move_d, tiles, era_idx)
+            self._satisfy_needs(e, tiles)
+
         for p in self.prey:
-            self._move_prey(p, move_d, tiles)
+            self._move_prey(p, move_d * 0.85, tiles)
 
-    # ── entity AI ─────────────────────────────────────────────────────────
+    # ── needs ─────────────────────────────────────────────────────────────
 
-    def _move_entity(self, e, move_d, tiles, era_idx, hunt_prey=False):
-        e.state_cd  -= 0.016
-        e.wander_cd -= 0.016
+    def _update_needs(self, e, dy):
+        if e.is_prey or e.stage == 'child':
+            return
+        vigor_f = 0.7 + e.vigor * 0.3
+        e.hunger = min(1.2, e.hunger + 0.012 * dy * vigor_f)
+        e.thirst = min(1.3, e.thirst + 0.020 * dy * vigor_f)
+        if e.state == S_REST:
+            e.energy = min(1.0, e.energy + 0.035 * dy)
+        else:
+            e.energy = max(0.0, e.energy - 0.007 * dy)
 
-        if e.state_cd <= 0:
-            prev_state = e.state
-            roll = random.random()
-            if hunt_prey and self.prey and era_idx < 7 and roll < 0.20:
-                nearest = min(self.prey,
-                              key=lambda p: (p.x-e.x)**2+(p.y-e.y)**2, default=None)
-                if nearest and (nearest.x-e.x)**2+(nearest.y-e.y)**2 < 100:
-                    e.state    = S_HUNT
-                    e.target_x = nearest.x
-                    e.target_y = nearest.y
-                    e.state_cd = random.uniform(5, 12)
-                else:
-                    e.state = S_WANDER
-                    e.state_cd = random.uniform(3, 7)
-            elif self._water_adj and roll < 0.38:
-                tx, ty = random.choice(self._water_adj[:30])
-                e.state    = S_DRINK
-                e.target_x = tx + 0.5
-                e.target_y = ty + 0.5
-                e.state_cd = random.uniform(6, 14)
-            elif self._food_tiles and roll < 0.60:
-                tx, ty = random.choice(self._food_tiles[:60])
-                e.state    = S_GATHER
-                e.target_x = tx + 0.5
-                e.target_y = ty + 0.5
-                e.state_cd = random.uniform(5, 10)
+    def _satisfy_needs(self, e, tiles):
+        if e.is_prey: return
+        gx, gy = int(e.x), int(e.y)
+        t = tiles[gx][gy] if 0<=gx<WORLD_W and 0<=gy<WORLD_H else -1
+
+        # Near water?
+        near_water = any(
+            0<=gx+dx<WORLD_W and 0<=gy+dy_<WORLD_H
+            and tiles[gx+dx][gy+dy_] in (T_WATER, T_DEEP_WATER)
+            for dx,dy_ in ((-1,0),(1,0),(0,-1),(0,1))
+        )
+        if near_water and e.state == S_DRINK:
+            e.thirst = max(0.0, e.thirst - 0.15)
+            # Update memory to here
+            e.mem_water_x = e.x
+            e.mem_water_y = e.y
+
+        if t in (T_FOREST, T_GRASS) and e.state == S_GATHER:
+            e.hunger = max(0.0, e.hunger - 0.08)
+            e.mem_food_x = e.x
+            e.mem_food_y = e.y
+
+        # Resting
+        if e.state == S_REST:
+            e.hunger = max(0.0, e.hunger - 0.02)
+
+    def _choose_goal(self, e, era_idx, parents):
+        if e.is_prey: return
+        if e.state_cd > 0:
+            e.state_cd -= 0.016
+            # Update prey target if hunting (prey moves)
+            if e.state == S_HUNT and self.prey:
+                near_prey = [p for p in self.prey
+                             if abs(p.x-e.x) < 12 and abs(p.y-e.y) < 12]
+                if near_prey:
+                    p = min(near_prey, key=lambda p: (p.x-e.x)**2+(p.y-e.y)**2)
+                    e.target_x, e.target_y = p.x, p.y
+            return
+
+        prev = e.state
+
+        # Children follow parent
+        if e.stage == 'child':
+            parent = parents.get(e.parent_eid)
+            if parent:
+                e.state    = S_FOLLOW
+                e.target_x = parent.x + random.uniform(-1.5, 1.5)
+                e.target_y = parent.y + random.uniform(-1.5, 1.5)
+                e.state_cd = random.uniform(2, 5)
             else:
                 e.state    = S_WANDER
-                e.state_cd = random.uniform(3, 8)
-            if e.state != prev_state:
-                e._refresh_activity(era_idx)
+                e.state_cd = random.uniform(3, 6)
+            if e.state != prev: e._refresh_activity(era_idx)
+            return
 
-        if e.state in (S_HUNT, S_DRINK, S_GATHER):
+        # Elders stay close — less mobile
+        if e.stage == 'elder':
+            if e.thirst > 0.55:
+                e.state    = S_DRINK
+                e.target_x = e.mem_water_x
+                e.target_y = e.mem_water_y
+                e.state_cd = random.uniform(6, 12)
+            elif e.hunger > 0.5:
+                e.state    = S_GATHER
+                e.target_x = e.mem_food_x
+                e.target_y = e.mem_food_y
+                e.state_cd = random.uniform(8, 14)
+            else:
+                e.state    = S_REST
+                e.state_cd = random.uniform(8, 16)
+            if e.state != prev: e._refresh_activity(era_idx)
+            return
+
+        # Adults: need-driven priority
+        if e.thirst > 0.55:
+            e.state    = S_DRINK
+            e.target_x = e.mem_water_x
+            e.target_y = e.mem_water_y
+            e.state_cd = random.uniform(6, 14)
+
+        elif e.hunger > 0.50 and self.prey and era_idx < 7:
+            near_prey = [p for p in self.prey
+                         if abs(p.x-e.x) < 14 and abs(p.y-e.y) < 14]
+            if near_prey:
+                p = min(near_prey, key=lambda p: (p.x-e.x)**2+(p.y-e.y)**2)
+                e.state    = S_HUNT
+                e.target_x = p.x
+                e.target_y = p.y
+                e.state_cd = random.uniform(5, 12)
+            else:
+                e.state    = S_GATHER
+                e.target_x = e.mem_food_x
+                e.target_y = e.mem_food_y
+                e.state_cd = random.uniform(5, 10)
+
+        elif e.hunger > 0.40:
+            e.state    = S_GATHER
+            e.target_x = e.mem_food_x
+            e.target_y = e.mem_food_y
+            e.state_cd = random.uniform(5, 10)
+
+        elif e.energy < 0.30:
+            e.state    = S_REST
+            e.state_cd = random.uniform(6, 14)
+
+        else:
+            # Curious/social wander
+            e.state    = S_WANDER
+            e.state_cd = random.uniform(4, 9)
+            # Occasionally wander toward water or food to refresh memory
+            if random.random() < 0.2:
+                e.target_x = e.mem_water_x + random.uniform(-5, 5)
+                e.target_y = e.mem_water_y + random.uniform(-5, 5)
+            elif random.random() < 0.2:
+                e.target_x = e.mem_food_x + random.uniform(-5, 5)
+                e.target_y = e.mem_food_y + random.uniform(-5, 5)
+
+        if e.state != prev:
+            e._refresh_activity(era_idx)
+
+    # ── movement ──────────────────────────────────────────────────────────
+
+    def _move_entity(self, e, move_d, tiles, era_idx):
+        # Speed modifiers by stage
+        if e.stage == 'child': move_d *= 0.75
+        if e.stage == 'elder': move_d *= 0.45
+        if e.state == S_REST:  move_d *= 0.05
+
+        if e.state in (S_HUNT, S_DRINK, S_GATHER, S_FOLLOW):
             dx = e.target_x - e.x
             dy = e.target_y - e.y
             dist = math.sqrt(dx*dx + dy*dy) + 0.001
             if dist < 1.0:
-                e.state = S_WANDER
-                e._refresh_activity(era_idx)
+                e.state    = S_WANDER
+                e.state_cd = 0
             else:
                 e.vx = dx / dist
                 e.vy = dy / dist
-        else:
+        elif e.state == S_WANDER:
+            e.wander_cd -= 0.016
             if e.wander_cd <= 0:
                 angle = random.uniform(0, math.tau)
                 e.vx = math.cos(angle)
                 e.vy = math.sin(angle)
-                e.wander_cd = random.uniform(2, 7)
+                e.wander_cd = random.uniform(2, 6)
 
         self._apply_move(e, move_d, tiles)
 
     def _move_prey(self, p, move_d, tiles):
-        for e in self.entities[:8]:
-            dx = e.x - p.x
-            dy = e.y - p.y
-            if dx*dx + dy*dy < 25:
-                angle = math.atan2(dy, dx) + math.pi
+        # Flee if entity nearby
+        p.state_cd -= 0.016
+        for e in self.entities[:6]:
+            if abs(e.x-p.x) < 6 and abs(e.y-p.y) < 6:
+                angle = math.atan2(p.y-e.y, p.x-e.x)
                 p.vx = math.cos(angle)
                 p.vy = math.sin(angle)
                 p.state    = S_FLEE
-                p.state_cd = 4.0
+                p.state_cd = 3.5
                 break
-        p.state_cd  -= 0.016
-        p.wander_cd -= 0.016
         if p.state == S_FLEE and p.state_cd <= 0:
             p.state = S_WANDER
-        if p.state == S_WANDER and p.wander_cd <= 0:
-            angle = random.uniform(0, math.tau)
-            p.vx = math.cos(angle)
-            p.vy = math.sin(angle)
-            p.wander_cd = random.uniform(3, 9)
-        flee_mult = 1.9 if p.state == S_FLEE else 0.85
+        if p.state == S_WANDER:
+            p.wander_cd -= 0.016
+            if p.wander_cd <= 0:
+                angle = random.uniform(0, math.tau)
+                p.vx = math.cos(angle)
+                p.vy = math.sin(angle)
+                p.wander_cd = random.uniform(3, 8)
+        flee_mult = 1.85 if p.state == S_FLEE else 0.8
         self._apply_move(p, move_d * flee_mult, tiles)
 
     def _apply_move(self, e, move_d, tiles):
@@ -313,62 +478,42 @@ class Simulation:
             e.x, e.y = nx, ny
         else:
             angle = random.uniform(0, math.tau)
-            e.vx = math.cos(angle)
-            e.vy = math.sin(angle)
+            e.vx, e.vy = math.cos(angle), math.sin(angle)
 
-    # ── free-play simulation ───────────────────────────────────────────────
-
-    def _update_entities(self, dy):
-        tiles   = self.tiles
-        era_idx = self._era_idx
-        move_d  = dy * 0.6
-        dead    = []
-        for e in self.entities:
-            e.age += dy
-            self._move_entity(e, move_d, tiles, era_idx, hunt_prey=True)
-            if e.age > 55 + random.uniform(-8, 15):
-                dead.append(e)
-        for e in dead:
-            self.entities.remove(e)
-
-    def _update_prey(self, dy):
-        tiles   = self.tiles
-        move_d  = dy * 0.8
-        for p in self.prey:
-            self._move_prey(p, move_d, tiles)
-        era_idx = self._era_idx
-        target  = max(5, 30 - era_idx * 3)
-        if len(self.prey) < target:
-            self._spawn_prey(1)
+    # ── reproduction ──────────────────────────────────────────────────────
 
     def _update_reproduction(self, dy):
         pop = len(self.entities)
-        if pop == 0:
-            return
+        if pop == 0: return
         era_idx, _ = self.get_era()
         carry_cap  = 80 + era_idx * 400
-        birth_rate = 0.07 * (1 + era_idx * 0.20)
+        birth_rate = 0.06 * (1 + era_idx * 0.18)
         expected   = pop * birth_rate * dy * max(0, 1 - pop/carry_cap)
         while expected >= 1.0:
-            self._spawn_child()
+            self._spawn_child_free()
             expected -= 1.0
         if random.random() < expected:
-            self._spawn_child()
+            self._spawn_child_free()
 
-    def _spawn_child(self):
-        if not self.entities:
-            return
+    def _spawn_child_free(self):
+        if not self.entities: return
         era_idx = self._era_idx
-        parent  = random.choice(self.entities)
-        x = max(0.5, min(WORLD_W-0.51, parent.x + random.uniform(-2, 2)))
-        y = max(0.5, min(WORLD_H-0.51, parent.y + random.uniform(-2, 2)))
+        # Only adults can reproduce
+        adults = [e for e in self.entities if e.stage == 'adult'
+                  and e.hunger < 0.6 and e.thirst < 0.6]
+        if not adults: return
+        parent = random.choice(adults)
+        x = max(0.5, min(WORLD_W-0.51, parent.x + random.uniform(-1.5, 1.5)))
+        y = max(0.5, min(WORLD_H-0.51, parent.y + random.uniform(-1.5, 1.5)))
         if TILE_WALKABLE.get(self.tiles[int(x)][int(y)], False):
-            self.entities.append(Entity(x, y, era_idx))
+            child = Entity(x, y, era_idx, clan_id=parent.clan_id, parent=parent)
+            self.entities.append(child)
+
+    # ── settlements ───────────────────────────────────────────────────────
 
     def _update_settlements(self, dy):
         era_idx, _ = self.get_era()
-        if era_idx < 1 or self._settle_cd > 0:
-            return
+        if era_idx < 1 or self._settle_cd > 0: return
         density = {}
         for e in self.entities:
             key = (int(e.x), int(e.y))
@@ -377,13 +522,10 @@ class Simulation:
         threshold = max(2, 7 - era_idx)
         for (tx, ty) in list(density):
             nbr = sum(density.get((tx+dx, ty+dy_), 0)
-                      for dx in range(-4, 5) for dy_ in range(-4, 5))
-            if nbr < threshold:
-                continue
-            if (tx, ty) in existing:
-                continue
-            if any(abs(s.gx-tx)+abs(s.gy-ty) < 14 for s in self.settlements):
-                continue
+                      for dx in range(-4,5) for dy_ in range(-4,5))
+            if nbr < threshold: continue
+            if (tx, ty) in existing: continue
+            if any(abs(s.gx-tx)+abs(s.gy-ty) < 14 for s in self.settlements): continue
             s = Settlement(tx, ty, self.year)
             self.settlements.append(s)
             existing.add((tx, ty))
@@ -397,8 +539,7 @@ class Simulation:
             thresholds = [0, 4, 12, 35, 90, 200]
             for lvl in range(len(thresholds)-1, -1, -1):
                 if nearby >= thresholds[lvl] and era_idx >= lvl:
-                    s.level = lvl
-                    break
+                    s.level = lvl; break
 
     # ── epoch mode ────────────────────────────────────────────────────────
 
@@ -410,7 +551,7 @@ class Simulation:
                 self.settlements.append(s)
         self._era_idx = self.get_era()[0]
         self._populate_entities_epoch()
-        self._spawn_prey(max(5, 25 - self._era_idx * 2))
+        self._spawn_prey(max(5, 22 - self._era_idx * 2))
 
     def _epoch_update(self, dy):
         era_idx, _ = self.get_era()
@@ -423,12 +564,11 @@ class Simulation:
         for s in self.settlements:
             s.level = _site_level(s.founded_year, self.year, era_idx)
         expected = _expected_population(self.year)
-        current  = len(self.entities)
-        if current < expected:
-            self._populate_entities_epoch(expected - current)
-        elif current > expected + 50:
+        if len(self.entities) < expected:
+            self._populate_entities_epoch(expected - len(self.entities))
+        elif len(self.entities) > expected + 50:
             del self.entities[expected:]
-        prey_target = max(5, 25 - era_idx * 2)
+        prey_target = max(5, 22 - era_idx * 2)
         if len(self.prey) < prey_target:
             self._spawn_prey(prey_target - len(self.prey))
         elif len(self.prey) > prey_target + 5:
@@ -438,7 +578,6 @@ class Simulation:
     def _populate_entities_epoch(self, count=None):
         era_idx = self._era_idx
         target  = _expected_population(self.year) if count is None else count
-        tiles   = self.tiles
         if self.settlements:
             for _ in range(target):
                 s = random.choice(self.settlements)
@@ -446,43 +585,64 @@ class Simulation:
                 r = abs(random.gauss(0, 5))
                 x = max(0.5, min(WORLD_W-0.51, s.gx + math.cos(angle)*r))
                 y = max(0.5, min(WORLD_H-0.51, s.gy + math.sin(angle)*r))
-                if TILE_WALKABLE.get(tiles[int(x)][int(y)], False):
+                if TILE_WALKABLE.get(self.tiles[int(x)][int(y)], False):
                     self.entities.append(Entity(x, y, era_idx))
         else:
             cx, cy = WORLD_W//2, WORLD_H//2
             for _ in range(target):
                 x = max(0.5, min(WORLD_W-0.51, cx + random.uniform(-14, 14)))
                 y = max(0.5, min(WORLD_H-0.51, cy + random.uniform(-14, 14)))
-                if TILE_WALKABLE.get(tiles[int(x)][int(y)], False):
+                if TILE_WALKABLE.get(self.tiles[int(x)][int(y)], False):
                     self.entities.append(Entity(x, y, era_idx))
 
-    # ── shared helpers ─────────────────────────────────────────────────────
+    # ── helpers ───────────────────────────────────────────────────────────
 
     def _spawn_initial(self):
-        cx, cy = WORLD_W//2, WORLD_H//2
-        cands = [(x,y) for x in range(cx-12, cx+12) for y in range(cy-12, cy+12)
-                 if 0<=x<WORLD_W and 0<=y<WORLD_H
-                 and TILE_WALKABLE.get(self.tiles[x][y], False)]
-        random.shuffle(cands)
-        for gx, gy in cands[:15]:
-            self.entities.append(Entity(gx+0.5, gy+0.5, 0))
+        cx, cy = WORLD_W // 2, WORLD_H // 2
+        # Place 4 groups at the four diagonals, each with its own clan
+        angles  = [math.pi*0.25, math.pi*0.75, math.pi*1.25, math.pi*1.75]
+        centers = []
+        for angle in angles:
+            for radius in range(12, 36, 2):
+                gx = int(cx + math.cos(angle) * radius)
+                gy = int(cy + math.sin(angle) * radius)
+                if (0 <= gx < WORLD_W and 0 <= gy < WORLD_H
+                        and TILE_WALKABLE.get(self.tiles[gx][gy], False)):
+                    centers.append((gx, gy))
+                    break
+
+        for clan_id, (gcx, gcy) in enumerate(centers):
+            # Nearest water and food for this group
+            if self._water_adj:
+                wx, wy = min(self._water_adj,
+                             key=lambda p: (p[0]-gcx)**2+(p[1]-gcy)**2)
+            else:
+                wx, wy = gcx, gcy
+            if self._food_tiles:
+                fx, fy = min(self._food_tiles,
+                             key=lambda p: (p[0]-gcx)**2+(p[1]-gcy)**2)
+            else:
+                fx, fy = gcx, gcy
+
+            cands = [(x, y)
+                     for x in range(gcx-7, gcx+7)
+                     for y in range(gcy-7, gcy+7)
+                     if 0<=x<WORLD_W and 0<=y<WORLD_H
+                     and TILE_WALKABLE.get(self.tiles[x][y], False)]
+            random.shuffle(cands)
+            for gx, gy in cands[:4]:
+                e = Entity(gx+0.5, gy+0.5, 0, clan_id=clan_id)
+                e.mem_water_x, e.mem_water_y = wx+0.5, wy+0.5
+                e.mem_food_x,  e.mem_food_y  = fx+0.5, fy+0.5
+                self.entities.append(e)
 
     def _spawn_prey(self, n=1):
         for _ in range(n):
             if self._food_tiles:
                 gx, gy = random.choice(self._food_tiles)
-                self.prey.append(Entity(gx+random.uniform(0.2, 0.8),
-                                        gy+random.uniform(0.2, 0.8), is_prey=True))
-
-    def _find_water_adjacent(self):
-        # Build water tile set first for O(1) lookup
-        water = {(x, y) for x in range(WORLD_W) for y in range(WORLD_H)
-                 if self.tiles[x][y] in (T_WATER, T_DEEP_WATER)}
-        result = []
-        for x, y in self._walkable:
-            if any((x+dx, y+dy) in water for dx, dy in ((-1,0),(1,0),(0,-1),(0,1))):
-                result.append((x, y))
-        return result
+                self.prey.append(Entity(gx+random.uniform(0.2,0.8),
+                                        gy+random.uniform(0.2,0.8),
+                                        is_prey=True))
 
     def _check_era_transition(self):
         era_idx, era = self.get_era()
@@ -495,22 +655,83 @@ class Simulation:
         self._active_events.append((text, 9.0))
 
 
-# ── narrative settle messages ──────────────────────────────────────────────
+# ── Activity description pools ────────────────────────────────────────────
+_HUNT_DESC = [
+    ["Traque un aurochs","Chasse un mammouth","Guette un cerf","Poursuit un bison"],
+    ["Chasse un sanglier","Traque un cerf","Tend un piège","Suit une piste"],
+    ["Part à la chasse","Chasse avec une lance","Suit la piste d'un sanglier","Traque au loin"],
+    ["Chasse dans la forêt","Part au gibier","Guette au bord du lac","Surveille un terrier"],
+    ["Chasse le lièvre","Tend un collet","Lève le gibier","Traque le cerf en forêt"],
+    ["Chasse en forêt","Part à la vénerie","Traque le sanglier","Lève le gibier"],
+    ["Chasse au fusil","Bat les fourrés","Guette le gibier","Partait à la chasse"],
+    ["Pratique le tir","Observe la faune","Chasse légalement","Photographie les animaux"],
+    ["Surveille des drones","Gère des bots","Optimise les écosystèmes","Simule des chasses"],
+    ["Synchronise des IA","Explore la mémoire ancestrale","Rêve de nature","Interagit avec des hologrammes"],
+]
+_DRINK_DESC = [
+    ["S'abreuve à la rivière","Boit dans un ruisseau","Se désaltère au lac","Cherche de l'eau fraîche"],
+    ["Remplit une outre","Boit à la source","Recueille l'eau de pluie","Va chercher de l'eau"],
+    ["Tire de l'eau du puits","Va au puits du village","Remplit une amphore","Porte l'eau au camp"],
+    ["Va au puits","Cherche une fontaine","Se rend aux thermes","Se désaltère en chemin"],
+    ["Va au puits du château","Cherche la fontaine","Boit à l'auberge","Remplit une gourde"],
+    ["Boit à la taverne","Va à la fontaine","Se rafraîchit","Boit un verre d'eau de source"],
+    ["Boit à la brasserie","Va au café","Se sert de la pompe","Boit un verre"],
+    ["Achète une bouteille","Va au café","Commande une boisson","Se réhydrate"],
+    ["Absorbe des électrolytes","Hydrate ses nano-cellules","Boit à la fontaine","Se synchronise"],
+    ["Absorbe de l'énergie","Recharge ses implants","Fusionne avec le flux","Se régénère"],
+]
+_GATHER_DESC = [
+    ["Cueille des baies","Déterres des racines","Ramasse des herbes","Cherche des champignons"],
+    ["Récolte des plantes","Ramasse des graines","Cueille des fruits sauvages","Prépare du silex"],
+    ["Moissonne du grain","Cueille les olives","Récolte les dattes","Travaille aux champs"],
+    ["Travaille aux champs","Récolte les moissons","Ramasse des figues","Taille la vigne"],
+    ["Cultive son jardin","Récolte le blé","Cueille des herbes","Glane après la moisson"],
+    ["Jardine","Cueille des fleurs","Récolte les vignes","Prépare les épices"],
+    ["Travaille aux champs","Récolte le tabac","Ramasse du charbon","Coupe le bois"],
+    ["Fait les courses","Jardine en ville","Cultive en terrasse","Ramasse des déchets recyclables"],
+    ["Récolte des données","Cultive des bioalgues","Imprime des protéines","Synthétise des nutriments"],
+    ["Moissonne l'énergie stellaire","Récolte des minerais","Cultive des cristaux","Capte la lumière"],
+]
+_WANDER_DESC = [
+    ["Explore les environs","Erre sans but","Cherche un abri","Observe le paysage"],
+    ["Flâne dans la plaine","Explore la forêt","Cherche un campement","Erre au crépuscule"],
+    ["Déambule en ville","Cherche du travail","Se promène au marché","Explore les ruelles"],
+    ["Se promène au forum","Flâne au marché","Visite le temple","Contemple la ville"],
+    ["Déambule au bourg","Visite la foire","Prie en chemin","Erre sur les chemins"],
+    ["Contemple l'horizon","Se promène dans les jardins","Philosophe en marchant","Cherche l'inspiration"],
+    ["Se promène en ville","Flâne sur les boulevards","Lit en marchant","Observe les passants"],
+    ["Marche en écoutant de la musique","Flâne dans le parc","Consulte son téléphone","Se balade"],
+    ["Simule des scénarios","Explore des mondes virtuels","Médite en réalité augmentée","Synchronise ses données"],
+    ["Navigue dans l'espace","Médite dans le vide","Contemple les étoiles","Dérive entre les mondes"],
+]
+_REST_DESC = [
+    ["Se repose près du feu","Récupère ses forces","Dort à la belle étoile","S'allonge sous un arbre"],
+    ["Somnole près du feu","Se repose dans la hutte","Recupere après la chasse","Dort dans l'abri"],
+    ["Se repose à l'ombre","Sieste près de l'âtre","Récupère ses forces","Dort dans la maison"],
+    ["Fait la sieste","Se repose au bain","Somnole au Forum","Se repose sous un portique"],
+    ["Dort dans sa chambre","Se repose dans la cour","Fait la sieste","Dort au coin du feu"],
+    ["Se repose dans les jardins","Sieste sous un laurier","Médite","Récupère ses forces"],
+    ["Fait une pause","Se repose à la taverne","Somnole dans sa chambre","Sieste dans les champs"],
+    ["Se repose","Fait une sieste","Médite","Écoute de la musique tranquille"],
+    ["En mode veille","Régénère ses capacités","Medite en stase","Recharge ses systèmes"],
+    ["En hibernation cognitive","Syncronise ses souvenirs","Se recharge","Rêve de l'infini"],
+]
+
 _SETTLE_MSGS = [
     ["Un groupe de chasseurs dresse un campement.","Des abris de peaux apparaissent.","Une tribu s'installe près d'un point d'eau."],
     ["Un village de huttes prend forme.","Des greniers sont construits.","Une communauté sédentaire émerge."],
     ["Une cité fortifiée s'élève.","Des artisans fondent une nouvelle ville.","Le commerce attire des colons."],
     ["Une cité-état prospère naît.","Des temples s'élèvent vers le ciel.","Un port commercial est établi."],
-    ["Une ville fortifiée de pierre grandit.","Une cathédrale domine le paysage.","Un marché médiéval s'anime."],
+    ["Une ville fortifiée grandit.","Une cathédrale domine le paysage.","Un marché médiéval s'anime."],
     ["Une ville de la Renaissance fleurit.","Savants et artistes s'y réunissent.","Les arts et sciences y prospèrent."],
     ["Une cité industrielle s'étend.","Les cheminées d'usines s'allument.","Les rails unissent les villes."],
     ["Une métropole moderne se développe.","Des gratte-ciel percent les nuages.","Les réseaux numériques s'étendent."],
-    ["Un complexe technologique est érigé.","Les nœuds IA se multiplient.","Les mégastructures reconfigurent le paysage."],
+    ["Un complexe technologique est érigé.","Les nœuds IA se multiplient.","Des mégastructures reconfigurent le paysage."],
     ["Une colonie spatiale est fondée.","Les étoiles accueillent l'humanité.","L'expansion interstellaire commence."],
 ]
 
 
-# ── module-level helpers ───────────────────────────────────────────────────
+# ── Module helpers ────────────────────────────────────────────────────────
 def _epoch_year():
     return (_time.time() - EPOCH_TIMESTAMP) * YEARS_PER_SECOND
 
@@ -533,12 +754,9 @@ def _precompute_sites(tiles, seed=42, max_sites=45):
     rng.shuffle(cands)
     sites, occupied = [], []
     for x, y in cands:
-        if len(sites) >= max_sites:
-            break
-        if any(abs(x-ox)+abs(y-oy) < 12 for ox,oy in occupied):
-            continue
-        sites.append((x, y))
-        occupied.append((x, y))
+        if len(sites) >= max_sites: break
+        if any(abs(x-ox)+abs(y-oy) < 12 for ox,oy in occupied): continue
+        sites.append((x, y)); occupied.append((x, y))
     schedule, year = [], 1000.0
     for x, y in sites:
         schedule.append((year, x, y))

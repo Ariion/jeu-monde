@@ -2,7 +2,12 @@ import pygame
 import math
 from config import (SCREEN_W, SCREEN_H, TILE_W, TILE_H, WORLD_W, WORLD_H,
                     TILE_COLORS, TILE_HEIGHTS, TIME_SPEEDS, ERAS)
-from simulation import S_HUNT, S_DRINK, S_GATHER, S_FLEE, S_WANDER
+from simulation import S_HUNT, S_DRINK, S_GATHER, S_FLEE, S_WANDER, CLAN_COLORS
+
+# ── Cached surfaces (allocated once, not every frame) ────────────────────────
+_BAR_SURF  = None
+_BOT_SURF  = None
+_INFO_BG   = None
 
 
 # ───────────────────────────── colour helpers ────────────────────────────────
@@ -186,11 +191,20 @@ _CLOTH2 = [   # highlight / second layer colour
 
 def _draw_character(surface, sx, sy, entity, era_idx, tick, zoom, selected=False):
     r = max(2, int(zoom * 5))          # base unit: head radius
+    # Children appear smaller
+    if not entity.is_prey and entity.stage == 'child':
+        r = max(2, int(r * 0.62))
 
     ei = min(era_idx, len(_SKIN)-1)
     skin  = _SKIN[ei]
     cloth = _CLOTH[ei]
     c2    = _CLOTH2[ei]
+
+    # Tint cloth with clan colour
+    if not entity.is_prey:
+        cc    = CLAN_COLORS[entity.clan_id % len(CLAN_COLORS)]
+        cloth = _mix(cloth, cc, 0.45)
+        c2    = _mix(c2,    cc, 0.35)
 
     # Phase offset per entity so all don't walk in sync
     phase    = tick * 5.5 + entity.eid * 2.37
@@ -345,14 +359,16 @@ def _draw_info_panel(surface, entity, era_idx, year, fonts):
     if entity is None:
         return
 
-    PW, PH = 280, 185
+    PW, PH = 280, 195
     px = 14
     py = SCREEN_H - PH - 36   # just above bottom bar
 
-    # Background
-    bg = pygame.Surface((PW, PH))
-    bg.fill((18, 14, 10))
-    surface.blit(bg, (px, py))
+    # Background — cached, created once
+    global _INFO_BG
+    if _INFO_BG is None:
+        _INFO_BG = pygame.Surface((PW, PH))
+        _INFO_BG.fill((18, 14, 10))
+    surface.blit(_INFO_BG, (px, py))
 
     era_color = (
         (200,160,80),(200,165,85),(205,168,88),(208,172,95),
@@ -372,21 +388,22 @@ def _draw_info_panel(surface, entity, era_idx, year, fonts):
     age_s = fonts['sm'].render(f"{int(entity.age)} ans  •  {era_name}", True, (160,160,180))
     surface.blit(age_s, (px+12, py+26))
 
-    # Activity icon strip
-    state_icons = {1:"⚔", 2:"💧", 3:"🌿", 0:"✦"}
+    # Activity / state
+    state_icons = {1:"⚔", 2:"💧", 3:"🌿", 4:"💤", 5:"👣", 0:"✦"}
     icon = state_icons.get(entity.state, "•")
     act_text = f"{icon}  {entity.activity_desc}" if entity.activity_desc else f"{icon}  Erre..."
     act_s = fonts['sm'].render(act_text[:38], True, (220, 210, 170))
     surface.blit(act_s, (px+10, py+50))
 
-    # Position (debug / immersion)
-    pos_s = fonts['sm'].render(f"Position : ({entity.x:.0f}, {entity.y:.0f})", True, (100,100,110))
-    surface.blit(pos_s, (px+10, py+66))
+    # Needs summary
+    needs_s = fonts['sm'].render(entity.needs_summary(), True, (160, 150, 120))
+    surface.blit(needs_s, (px+10, py+68))
 
-    # Bars
-    _bar(surface, px+12, py+92,  PW-24, "Santé",   entity.health,  (60,190,70),  fonts)
-    _bar(surface, px+12, py+118, PW-24, "Vigueur",  entity.vigor,   (80,130,220), fonts)
-    _bar(surface, px+12, py+144, PW-24, "Âge rel.", 1-entity.health,(190,120,50), fonts)
+    # Bars — hunger/thirst inverted (0=good=full bar, 1=bad=empty bar)
+    _bar(surface, px+12, py+90,  PW-24, "Faim",    1-min(1.0, entity.hunger), (190,130,50), fonts)
+    _bar(surface, px+12, py+116, PW-24, "Soif",    1-min(1.0, entity.thirst), (80, 160,220), fonts)
+    _bar(surface, px+12, py+142, PW-24, "Énergie", entity.energy,             (80, 190,80),  fonts)
+    _bar(surface, px+12, py+168, PW-24, "Santé",   entity.health,             (60, 190,70),  fonts)
 
     # Close hint
     hint_s = fonts['sm'].render("clic droit · fermer", True, (70, 68, 62))
@@ -461,10 +478,12 @@ def render(surface, sim, tiles, camera, fonts, tick, selected_entity=None):
 # ───────────────────────────── HUD ───────────────────────────────────────────
 
 def _draw_ui(surface, sim, era_idx, era, fonts, zoom=1.0):
-    # top bar
-    bar = pygame.Surface((SCREEN_W, 52), pygame.SRCALPHA)
-    bar.fill((0, 0, 0, 155))
-    surface.blit(bar, (0, 0))
+    global _BAR_SURF, _BOT_SURF
+    # top bar — cached
+    if _BAR_SURF is None:
+        _BAR_SURF = pygame.Surface((SCREEN_W, 52), pygame.SRCALPHA)
+        _BAR_SURF.fill((0, 0, 0, 155))
+    surface.blit(_BAR_SURF, (0, 0))
 
     era_s = fonts['big'].render(era[1], True, (255, 218, 140))
     surface.blit(era_s, (18, 10))
@@ -493,10 +512,11 @@ def _draw_ui(surface, sim, era_idx, era, fonts, zoom=1.0):
         pygame.draw.rect(surface, (45,42,38),    (18, 48, bw, 4))
         pygame.draw.rect(surface, (255,200,80),  (18, 48, int(bw*prog), 4))
 
-    # bottom bar
-    bot = pygame.Surface((SCREEN_W, 28), pygame.SRCALPHA)
-    bot.fill((0, 0, 0, 140))
-    surface.blit(bot, (0, SCREEN_H-28))
+    # bottom bar — cached
+    if _BOT_SURF is None:
+        _BOT_SURF = pygame.Surface((SCREEN_W, 28), pygame.SRCALPHA)
+        _BOT_SURF.fill((0, 0, 0, 140))
+    surface.blit(_BOT_SURF, (0, SCREEN_H-28))
 
     desc_s = fonts['sm'].render(era[3], True, (150,150,182))
     surface.blit(desc_s, (18, SCREEN_H-22))
@@ -515,12 +535,8 @@ def _draw_ui(surface, sim, era_idx, era, fonts, zoom=1.0):
         col = (255, 212, 70) if is_era else (195,195,195)
         ev_s = fonts['sm'].render(text, True, col)
         if rem < 2.0:
-            ev_surf = pygame.Surface(ev_s.get_size(), pygame.SRCALPHA)
-            ev_surf.blit(ev_s, (0,0))
-            ev_surf.set_alpha(int(rem / 2.0 * 255))
-            surface.blit(ev_surf, (18, y_ev))
-        else:
-            surface.blit(ev_s, (18, y_ev))
+            ev_s.set_alpha(int(rem / 2.0 * 255))
+        surface.blit(ev_s, (18, y_ev))
         y_ev += 20
 
     # zoom indicator (bottom right above hint)
