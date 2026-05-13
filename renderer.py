@@ -2,7 +2,8 @@ import pygame
 import math
 from config import (SCREEN_W, SCREEN_H, TILE_W, TILE_H, WORLD_W, WORLD_H,
                     TILE_COLORS, TILE_HEIGHTS, TIME_SPEEDS, ERAS)
-from simulation import S_HUNT, S_DRINK, S_GATHER, S_FLEE, S_WANDER, CLAN_COLORS
+from simulation import (S_HUNT, S_DRINK, S_GATHER, S_FLEE, S_WANDER,
+                        S_CHOP, S_BUILD, CLAN_COLORS)
 
 # ── Cached surfaces (allocated once, not every frame) ────────────────────────
 _BAR_SURF  = None
@@ -294,23 +295,45 @@ def _draw_character(surface, sx, sy, entity, era_idx, tick, zoom, selected=False
         # Name tag above
         pass  # drawn separately in _draw_nametag
 
+    # ── wood bundle on back when carrying ──
+    if not entity.is_prey and entity.inv_wood > 0 and zoom >= 0.7:
+        wr = max(2, int(3 * zoom))
+        # Brown log bundle above right shoulder
+        wx_ = sx + r
+        wy_ = body_top - wr * 2
+        pygame.draw.rect(surface, (115, 78, 38), (wx_, wy_, wr*2, wr*3))
+        pygame.draw.rect(surface, (160, 110, 58), (wx_, wy_, wr*2, wr*3), 1)
+        # Stack indicator if lots of wood
+        if entity.inv_wood >= 3 and zoom >= 1.0:
+            pygame.draw.rect(surface, (145, 96, 48),
+                             (wx_ - wr//2, wy_ + wr//2, wr*2, wr*2))
+
     # ── activity icon ──
     if zoom > 0.5:
         ix = sx + r + max(2, int(3*zoom))
         iy = body_top - r - max(2, int(3*zoom))
         icon_r = max(2, int(3*zoom))
         if entity.state == S_HUNT:
-            # Red spear / arrow icon
             pygame.draw.polygon(surface, (210,45,25),
                 [(ix, iy-icon_r), (ix+icon_r, iy+icon_r), (ix-icon_r, iy+icon_r)])
         elif entity.state == S_DRINK:
-            # Blue drop
             pygame.draw.circle(surface, (50,140,215), (ix, iy), icon_r)
             pygame.draw.polygon(surface, (50,140,215),
                 [(ix-icon_r//2, iy), (ix+icon_r//2, iy), (ix, iy-icon_r-icon_r//2)])
         elif entity.state == S_GATHER:
-            # Green leaf
             pygame.draw.circle(surface, (55,185,55), (ix, iy), icon_r)
+        elif entity.state == S_CHOP:
+            # Brown axe shape
+            pygame.draw.line(surface, (115,78,38), (ix, iy+icon_r), (ix, iy-icon_r),
+                             max(1, icon_r//2))
+            pygame.draw.polygon(surface, (185,145,80),
+                [(ix, iy-icon_r), (ix+icon_r, iy-icon_r//2), (ix+icon_r//2, iy+icon_r//2)])
+        elif entity.state == S_BUILD:
+            # Hammer outline
+            pygame.draw.rect(surface, (185,155,90),
+                             (ix - icon_r//2, iy - icon_r, icon_r, icon_r))
+            pygame.draw.line(surface, (150,120,70), (ix, iy), (ix, iy + icon_r),
+                             max(1, icon_r//2))
 
 
 def _draw_nametag(surface, sx, sy, entity, era_idx, zoom, fonts):
@@ -389,14 +412,17 @@ def _draw_info_panel(surface, entity, era_idx, year, fonts):
     surface.blit(age_s, (px+12, py+26))
 
     # Activity / state
-    state_icons = {1:"⚔", 2:"💧", 3:"🌿", 4:"💤", 5:"👣", 0:"✦"}
+    state_icons = {0:"✦", 1:"⚔", 2:"💧", 3:"🌿", 4:"💤", 5:"👣", 7:"🪓", 8:"🏗"}
     icon = state_icons.get(entity.state, "•")
     act_text = f"{icon}  {entity.activity_desc}" if entity.activity_desc else f"{icon}  Erre..."
     act_s = fonts['sm'].render(act_text[:38], True, (220, 210, 170))
     surface.blit(act_s, (px+10, py+50))
 
-    # Needs summary
-    needs_s = fonts['sm'].render(entity.needs_summary(), True, (160, 150, 120))
+    # Needs summary + wood inventory
+    needs_txt = entity.needs_summary()
+    if entity.inv_wood > 0:
+        needs_txt += f"  ·  bois: {entity.inv_wood}"
+    needs_s = fonts['sm'].render(needs_txt, True, (160, 150, 120))
     surface.blit(needs_s, (px+10, py+68))
 
     # Bars — hunger/thirst inverted (0=good=full bar, 1=bad=empty bar)
@@ -450,6 +476,23 @@ def render(surface, sim, tiles, camera, fonts, tick, selected_entity=None):
             s = settle_map.get((gx, gy))
             if s:
                 _draw_building(surface, gx, gy, s.level, era_idx, cam_x, cam_y, zoom, tick)
+
+    # ── stumps (recently cleared forest tiles) ──
+    if zoom >= 0.5:
+        stump_r = max(1, int(2.5 * zoom))
+        for (cx, cy, t_rem) in sim.cleared_tiles:
+            sx, sy = world_to_screen(cx + 0.5, cy + 0.5, cam_x, cam_y, zoom)
+            if -8 < sx < SCREEN_W + 8 and -8 < sy < SCREEN_H + 8:
+                alpha = min(255, int(t_rem / 300.0 * 255))
+                # Stump cross
+                lw = max(1, stump_r // 2)
+                col = (110, 80, 45, alpha)
+                pygame.draw.circle(surface, (110, 80, 45), (sx, sy), stump_r)
+                if zoom >= 0.9:
+                    pygame.draw.line(surface, (75, 52, 28),
+                                     (sx - stump_r, sy), (sx + stump_r, sy), lw)
+                    pygame.draw.line(surface, (75, 52, 28),
+                                     (sx, sy - stump_r), (sx, sy + stump_r), lw)
 
     # ── prey ──
     for p in sim.prey:

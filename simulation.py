@@ -38,6 +38,8 @@ S_GATHER  = 3
 S_REST    = 4
 S_FOLLOW  = 5   # children following parent
 S_FLEE    = 6   # prey fleeing
+S_CHOP    = 7   # chop trees / gather wood
+S_BUILD   = 8   # carry wood to shelter site
 
 _ACTIVITY_LABELS = {
     S_WANDER: "Explore",
@@ -46,6 +48,8 @@ _ACTIVITY_LABELS = {
     S_GATHER: "Cueille",
     S_REST:   "Se repose",
     S_FOLLOW: "Suit le parent",
+    S_CHOP:   "Coupe du bois",
+    S_BUILD:  "Construit",
 }
 
 _eid_counter = 0
@@ -63,6 +67,8 @@ class Entity:
         # memory (learned locations)
         'mem_water_x','mem_water_y',
         'mem_food_x','mem_food_y',
+        # inventory
+        'inv_wood',
     ]
 
     def __init__(self, x, y, era_idx=0, is_prey=False,
@@ -83,6 +89,7 @@ class Entity:
         self.is_prey    = is_prey
         self.eid        = _eid_counter
         self.vigor      = random.uniform(0.6, 1.0)
+        self.inv_wood   = 0
 
         # Needs — start at a random point so not everyone acts at once
         self.hunger = random.uniform(0.1, 0.4)
@@ -137,6 +144,8 @@ class Entity:
             S_GATHER: _GATHER_DESC[ei],
             S_REST:   _REST_DESC[ei],
             S_FOLLOW: ["Suit ses aînés", "Reste près de sa famille", "Apprend à marcher"],
+            S_CHOP:   _CHOP_DESC[min(ei, len(_CHOP_DESC)-1)],
+            S_BUILD:  _BUILD_DESC[min(ei, len(_BUILD_DESC)-1)],
         }
         pool = labels.get(self.state, _WANDER_DESC[ei])
         self.activity_desc = random.choice(pool)
@@ -186,8 +195,16 @@ class Simulation:
                                    for dx,dy in ((-1,0),(1,0),(0,-1),(0,1)))]
         self._food_tiles = [(x,y) for x,y in self._walkable
                             if tiles[x][y] in (T_FOREST, T_GRASS)]
-        # Spatial buckets for fast neighbour lookup
-        self._bucket_size = 8
+        # Terraforming: wood remaining per forest tile (4 chops to clear)
+        self.tile_resources  = {
+            (x, y): 5
+            for x in range(WORLD_W) for y in range(WORLD_H)
+            if tiles[x][y] == T_FOREST
+        }
+        # Visual: recently cleared tiles (x, y, timer) — show stump until timer=0
+        self.cleared_tiles   = []
+        # Construction: accumulated wood at build sites {(x,y): wood_count}
+        self._build_progress = {}
 
         if epoch:
             self._site_schedule = _precompute_sites(tiles)
@@ -270,6 +287,9 @@ class Simulation:
         if len(self.prey) < target:
             self._spawn_prey(1)
 
+        # Decay stump visuals
+        self.cleared_tiles = [(x, y, t - dy) for x, y, t in self.cleared_tiles if t > dy]
+
     def _animate_all(self, dt):
         """Epoch mode: animate at real-time speed."""
         era_idx  = self._era_idx
@@ -286,6 +306,8 @@ class Simulation:
 
         for p in self.prey:
             self._move_prey(p, move_d * 0.85, tiles)
+
+        self.cleared_tiles = [(x, y, t - dt) for x, y, t in self.cleared_tiles if t > dt]
 
     # ── needs ─────────────────────────────────────────────────────────────
 
@@ -313,7 +335,6 @@ class Simulation:
         )
         if near_water and e.state == S_DRINK:
             e.thirst = max(0.0, e.thirst - 0.15)
-            # Update memory to here
             e.mem_water_x = e.x
             e.mem_water_y = e.y
 
@@ -322,12 +343,47 @@ class Simulation:
             e.mem_food_x = e.x
             e.mem_food_y = e.y
 
+        # Chopping: harvest wood, clear tile after 4 chops
+        if e.state == S_CHOP and t == T_FOREST:
+            key = (gx, gy)
+            res = self.tile_resources.get(key, 0)
+            if res > 0:
+                self.tile_resources[key] = res - 1
+                e.inv_wood = min(8, e.inv_wood + 1)
+                e.hunger   = max(0.0, e.hunger - 0.01)   # physical work
+                if self.tile_resources[key] <= 0:
+                    # Tree is felled — clear the tile
+                    self.tiles[gx][gy] = T_GRASS
+                    del self.tile_resources[key]
+                    self.cleared_tiles.append((gx, gy, 300.0))
+                    if random.random() < 0.08:
+                        self._add_event("Des arbres sont abattus pour construire.")
+            else:
+                # No more wood here — move on
+                e.state    = S_WANDER
+                e.state_cd = 0
+
+        # Building: deposit carried wood at site
+        if e.state == S_BUILD and e.inv_wood > 0:
+            self._try_build(e)
+
         # Resting
         if e.state == S_REST:
             e.hunger = max(0.0, e.hunger - 0.02)
 
     def _choose_goal(self, e, era_idx, parents):
         if e.is_prey: return
+
+        # Interrupt current task if arms are full of wood → go build now
+        if e.inv_wood >= 5 and e.state not in (S_BUILD, S_DRINK):
+            tx, ty     = self._find_build_spot(e)
+            e.state    = S_BUILD
+            e.target_x = tx
+            e.target_y = ty
+            e.state_cd = random.uniform(6, 12)
+            e._refresh_activity(era_idx)
+            return
+
         if e.state_cd > 0:
             e.state_cd -= 0.016
             # Update prey target if hunting (prey moves)
@@ -375,12 +431,22 @@ class Simulation:
 
         # Adults: need-driven priority
         if e.thirst > 0.55:
+            # Urgent thirst
             e.state    = S_DRINK
             e.target_x = e.mem_water_x
             e.target_y = e.mem_water_y
             e.state_cd = random.uniform(6, 14)
 
-        elif e.hunger > 0.50 and self.prey and era_idx < 7:
+        elif e.inv_wood >= 3:
+            # Loaded with wood → deposit and build immediately
+            tx, ty     = self._find_build_spot(e)
+            e.state    = S_BUILD
+            e.target_x = tx
+            e.target_y = ty
+            e.state_cd = random.uniform(6, 12)
+
+        elif e.hunger > 0.65 and self.prey and era_idx < 7:
+            # Very hungry → hunt
             near_prey = [p for p in self.prey
                          if abs(p.x-e.x) < 14 and abs(p.y-e.y) < 14]
             if near_prey:
@@ -395,21 +461,33 @@ class Simulation:
                 e.target_y = e.mem_food_y
                 e.state_cd = random.uniform(5, 10)
 
-        elif e.hunger > 0.40:
+        elif e.energy < 0.25:
+            # Exhausted → rest
+            e.state    = S_REST
+            e.state_cd = random.uniform(6, 14)
+
+        elif e.hunger > 0.45:
+            # Moderately hungry → gather
             e.state    = S_GATHER
             e.target_x = e.mem_food_x
             e.target_y = e.mem_food_y
             e.state_cd = random.uniform(5, 10)
 
-        elif e.energy < 0.30:
-            e.state    = S_REST
-            e.state_cd = random.uniform(6, 14)
+        elif era_idx < 8 and random.random() < 0.40:
+            # Not hungry/thirsty/exhausted — go chop wood (or build if loaded)
+            target = self._find_chop_target(e)
+            if target:
+                e.state    = S_CHOP
+                e.target_x, e.target_y = target
+                e.state_cd = random.uniform(5, 10)
+            else:
+                e.state    = S_WANDER
+                e.state_cd = random.uniform(4, 9)
 
         else:
-            # Curious/social wander
+            # Explore / social wander
             e.state    = S_WANDER
             e.state_cd = random.uniform(4, 9)
-            # Occasionally wander toward water or food to refresh memory
             if random.random() < 0.2:
                 e.target_x = e.mem_water_x + random.uniform(-5, 5)
                 e.target_y = e.mem_water_y + random.uniform(-5, 5)
@@ -428,13 +506,18 @@ class Simulation:
         if e.stage == 'elder': move_d *= 0.45
         if e.state == S_REST:  move_d *= 0.05
 
-        if e.state in (S_HUNT, S_DRINK, S_GATHER, S_FOLLOW):
+        if e.state in (S_HUNT, S_DRINK, S_GATHER, S_FOLLOW, S_CHOP, S_BUILD):
             dx = e.target_x - e.x
             dy = e.target_y - e.y
             dist = math.sqrt(dx*dx + dy*dy) + 0.001
             if dist < 1.0:
-                e.state    = S_WANDER
-                e.state_cd = 0
+                # S_CHOP and S_BUILD: stay in state, _satisfy_needs handles completion
+                if e.state not in (S_CHOP, S_BUILD):
+                    e.state    = S_WANDER
+                    e.state_cd = 0
+                # else: stop moving, keep chopping/building in place
+                e.vx = 0.0
+                e.vy = 0.0
             else:
                 e.vx = dx / dist
                 e.vy = dy / dist
@@ -479,6 +562,61 @@ class Simulation:
         else:
             angle = random.uniform(0, math.tau)
             e.vx, e.vy = math.cos(angle), math.sin(angle)
+
+    # ── terraforming helpers ─────────────────────────────────────────────
+
+    def _find_chop_target(self, e):
+        """Nearest accessible forest tile within 16 tiles."""
+        ex, ey = int(e.x), int(e.y)
+        best, best_d = None, float('inf')
+        for dx in range(-16, 17):
+            for dy in range(-16, 17):
+                x, y = ex + dx, ey + dy
+                if (0 <= x < WORLD_W and 0 <= y < WORLD_H
+                        and self.tiles[x][y] == T_FOREST
+                        and (x, y) in self.tile_resources):
+                    d = dx*dx + dy*dy
+                    if d < best_d:
+                        best_d = d
+                        best   = (x + 0.5, y + 0.5)
+        return best
+
+    def _find_build_spot(self, e):
+        """Target position where entity will deposit wood."""
+        # Prefer nearest settlement of own clan's vicinity
+        if self.settlements:
+            s = min(self.settlements,
+                    key=lambda s: (s.gx - e.x)**2 + (s.gy - e.y)**2)
+            if (s.gx - e.x)**2 + (s.gy - e.y)**2 < 400:
+                return s.gx + 0.5, s.gy + 0.5
+        # No nearby settlement: build where clan is clustering
+        clan_mates = [c for c in self.entities
+                      if c.clan_id == e.clan_id and c is not e]
+        if clan_mates:
+            cx = sum(c.x for c in clan_mates) / len(clan_mates)
+            cy = sum(c.y for c in clan_mates) / len(clan_mates)
+            return cx + random.uniform(-2, 2), cy + random.uniform(-2, 2)
+        return e.x + random.uniform(-3, 3), e.y + random.uniform(-3, 3)
+
+    def _try_build(self, e):
+        """Deposit carried wood; found or upgrade settlement when threshold met."""
+        era_idx   = self._era_idx
+        # Snap to 4×4 grid so nearby clan members pool wood at the same site
+        bx = (int(e.x) // 4) * 4
+        by = (int(e.y) // 4) * 4
+        key       = (bx, by)
+
+        self._build_progress[key] = self._build_progress.get(key, 0) + e.inv_wood
+        e.inv_wood = 0
+
+        # If enough wood accumulated and no settlement too close → found one
+        if self._build_progress.get(key, 0) >= 8:
+            if not any(abs(s.gx - bx) + abs(s.gy - by) < 12 for s in self.settlements):
+                s = Settlement(bx + 2, by + 2, self.year)
+                self.settlements.append(s)
+                self._add_event(
+                    random.choice(_SETTLE_MSGS[min(era_idx, len(_SETTLE_MSGS)-1)]))
+                del self._build_progress[key]
 
     # ── reproduction ──────────────────────────────────────────────────────
 
@@ -715,6 +853,31 @@ _REST_DESC = [
     ["Se repose","Fait une sieste","Médite","Écoute de la musique tranquille"],
     ["En mode veille","Régénère ses capacités","Medite en stase","Recharge ses systèmes"],
     ["En hibernation cognitive","Syncronise ses souvenirs","Se recharge","Rêve de l'infini"],
+]
+
+_CHOP_DESC = [
+    ["Abat un arbre","Coupe du bois","Taille des branches","Débite un tronc"],
+    ["Coupe du bois pour l'abri","Taille des piquets","Abat des arbres","Récolte du bois"],
+    ["Coupe du bois de construction","Déboise la clairière","Prépare des poutres","Abat la forêt"],
+    ["Bûcheronne","Débite des planches","Coupe le bois d'œuvre","Défriche la forêt"],
+    ["Coupe du bois de chauffage","Bûcheronne en forêt","Débite des solives","Défriche"],
+    ["Coupe du bois","Débite des planches","Prépare le bois","Taille des madriers"],
+    ["Abat des arbres","Débite du bois","Coupe pour l'usine","Bûcheronne"],
+    ["Coupe du bois","Défriche","Abat des arbres","Prépare du bois"],
+    ["Synthétise du bois","Récolte la biomasse","Extrait la cellulose","Recycle le bois"],
+    ["Récolte des matériaux","Extrait des ressources","Synthétise des composants","Mine l'astéroïde"],
+]
+_BUILD_DESC = [
+    ["Dresse un abri","Tresse des branches","Construit une hutte","Bâtit un refuge"],
+    ["Construit un abri","Plante des piquets","Bâtit une cabane","Monte un campement"],
+    ["Construit une maison","Bâtit un mur","Érige un pilier","Édifie un logis"],
+    ["Bâtit une demeure","Construit un forum","Érige des colonnes","Construit une villa"],
+    ["Construit une tour","Bâtit un château","Érige des remparts","Construit une église"],
+    ["Bâtit un palais","Construit une cathédrale","Érige une loggia","Sculpte un portail"],
+    ["Construit une usine","Bâtit des logements","Pose des rails","Érige une cheminée"],
+    ["Bâtit un gratte-ciel","Construit une tour","Érige un pont","Construit un stade"],
+    ["Imprime un bâtiment","Assemble des modules","Programme une structure","Installe des nœuds"],
+    ["Construit une mégastructure","Bâtit une station","Érige un anneau spatial","Construit un monde"],
 ]
 
 _SETTLE_MSGS = [
