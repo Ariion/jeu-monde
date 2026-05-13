@@ -123,37 +123,79 @@ def _draw_building(surface, gx, gy, level, era_idx, cam_x, cam_y, tick):
 
 # ─────────────────────────── entity drawing ─────────────────────────────────
 
-def _draw_entity(surface, ex, ey, era_idx, cam_x, cam_y):
+# Import state constants (avoid circular imports by using values directly)
+_S_HUNT   = 1
+_S_DRINK  = 2
+_S_GATHER = 3
+
+
+def _draw_entity(surface, entity, era_idx, cam_x, cam_y):
+    ex, ey = entity.x, entity.y
     sx, sy = world_to_screen(ex, ey, cam_x, cam_y)
-    if sx < -4 or sx > SCREEN_W + 4 or sy < -4 or sy > SCREEN_H + 4:
+    if sx < -8 or sx > SCREEN_W + 8 or sy < -8 or sy > SCREEN_H + 8:
         return
 
-    if era_idx == 0:
-        body = (155, 105, 65)
-        pygame.draw.circle(surface, body, (sx, sy - 2), 2)
-        pygame.draw.line(surface, body, (sx, sy), (sx - 1, sy + 3))
+    r = 4   # base radius — big enough to see on phone
 
-    elif era_idx <= 2:
-        body = (175, 135, 85)
-        pygame.draw.circle(surface, body, (sx, sy - 2), 2)
-        pygame.draw.line(surface, body, (sx, sy), (sx, sy + 3))
+    if era_idx == 0:        # stooped pre-human, brown
+        body = (160, 108, 60)
+        pygame.draw.circle(surface, body, (sx, sy - r), r)
+        pygame.draw.line(surface, body, (sx, sy), (sx - 1, sy + r + 2), 2)
+        pygame.draw.line(surface, body, (sx, sy + 1), (sx + 2, sy + r + 2), 2)
 
-    elif era_idx <= 4:
-        pygame.draw.circle(surface, (195, 160, 105), (sx, sy - 2), 2)
-        pygame.draw.line(surface, (110, 80, 45), (sx, sy), (sx, sy + 4))
+    elif era_idx <= 2:      # early human, tan
+        body = (180, 138, 85)
+        pygame.draw.circle(surface, body, (sx, sy - r), r)
+        pygame.draw.line(surface, body, (sx, sy), (sx, sy + r + 2), 2)
+        pygame.draw.line(surface, body, (sx, sy + 2), (sx - 3, sy + r + 2), 2)
+        pygame.draw.line(surface, body, (sx, sy + 2), (sx + 3, sy + r + 2), 2)
 
-    elif era_idx <= 6:
-        pygame.draw.circle(surface, (210, 175, 130), (sx, sy - 2), 2)
-        pygame.draw.rect(surface, (60, 85, 140), (sx - 1, sy + 1, 3, 4))
+    elif era_idx <= 4:      # antiquity/medieval, with cloak
+        head = (200, 165, 110)
+        cloak = (110, 80, 45)
+        pygame.draw.circle(surface, head, (sx, sy - r), r)
+        pygame.draw.polygon(surface, cloak,
+            [(sx, sy), (sx - r - 1, sy + r + 4), (sx + r + 1, sy + r + 4)])
 
-    elif era_idx <= 7:
-        pygame.draw.circle(surface, (215, 190, 155), (sx, sy - 1), 2)
-        pygame.draw.rect(surface, (40, 60, 120), (sx - 1, sy + 1, 3, 4))
+    elif era_idx <= 6:      # industrial/modern, dark clothes
+        head = (210, 178, 132)
+        body_c = (55, 80, 135)
+        pygame.draw.circle(surface, head, (sx, sy - r), r)
+        pygame.draw.rect(surface, body_c, (sx - r + 1, sy, r * 2 - 2, r + 3))
 
-    else:
-        col = (200, 220, 255) if era_idx == 9 else (215, 225, 255)
-        pygame.draw.circle(surface, col, (sx, sy - 1), 2)
-        pygame.draw.rect(surface, (70, 110, 210), (sx - 1, sy + 1, 3, 4))
+    elif era_idx <= 7:      # modern, suit
+        head = (218, 192, 155)
+        body_c = (35, 55, 110)
+        pygame.draw.circle(surface, head, (sx, sy - r), r)
+        pygame.draw.rect(surface, body_c, (sx - r + 1, sy, r * 2 - 2, r + 3))
+
+    else:                   # future, glowing blue-white
+        col = (210, 228, 255)
+        glow = (100, 150, 255)
+        pygame.draw.circle(surface, glow, (sx, sy - r), r + 2)
+        pygame.draw.circle(surface, col,  (sx, sy - r), r)
+        pygame.draw.rect(surface, glow, (sx - r + 1, sy, r * 2 - 2, r + 3))
+
+    # Activity icon (small, above head)
+    if entity.state == _S_HUNT:
+        # Red dot = hunting
+        pygame.draw.circle(surface, (220, 60, 40), (sx + r + 2, sy - r - 3), 2)
+    elif entity.state == _S_DRINK:
+        # Blue dot = drinking
+        pygame.draw.circle(surface, (80, 160, 220), (sx + r + 2, sy - r - 3), 2)
+    elif entity.state == _S_GATHER:
+        # Green dot = gathering food
+        pygame.draw.circle(surface, (80, 200, 80), (sx + r + 2, sy - r - 3), 2)
+
+
+def _draw_prey(surface, entity, cam_x, cam_y):
+    """Draw an animal (prey) — small brown triangle."""
+    sx, sy = world_to_screen(entity.x, entity.y, cam_x, cam_y)
+    if sx < -6 or sx > SCREEN_W + 6 or sy < -6 or sy > SCREEN_H + 6:
+        return
+    col = (200, 150, 60) if entity.state != 4 else (220, 80, 40)  # orange, red when fleeing
+    pygame.draw.polygon(surface, col,
+        [(sx, sy - 5), (sx - 4, sy + 3), (sx + 4, sy + 3)])
 
 
 # ─────────────────────────── camera ─────────────────────────────────────────
@@ -200,11 +242,15 @@ def render(surface, sim, tiles, camera, fonts, tick):
             if s:
                 _draw_building(surface, gx, gy, s.level, era_idx, cam_x, cam_y, tick)
 
+    # Draw prey (animals)
+    for p in sim.prey:
+        _draw_prey(surface, p, cam_x, cam_y)
+
     # Draw entities (subsample when many for performance)
     entities = sim.entities
     step = max(1, len(entities) // 600)
     for e in entities[::step]:
-        _draw_entity(surface, e.x, e.y, era_idx, cam_x, cam_y)
+        _draw_entity(surface, e, era_idx, cam_x, cam_y)
 
     _draw_ui(surface, sim, era_idx, era, fonts)
 

@@ -3,6 +3,7 @@ import math
 import time as _time
 from config import (WORLD_W, WORLD_H, ERAS, TIME_SPEEDS, DEFAULT_SPEED_IDX,
                     TILE_WALKABLE, T_GRASS, T_SAND, T_FOREST, T_HIGHLAND,
+                    T_WATER, T_DEEP_WATER, TILE_COLORS,
                     EPOCH_TIMESTAMP, YEARS_PER_SECOND)
 
 
@@ -40,19 +41,31 @@ _SETTLE_MSGS = [
      "L'expansion interstellaire commence."],
 ]
 
+# Entity states
+S_WANDER  = 0
+S_HUNT    = 1
+S_DRINK   = 2
+S_GATHER  = 3
+S_FLEE    = 4   # prey fleeing
 
-# ── Entity (visual only in epoch mode) ────────────────────────────────────
+
+# ── Entity ────────────────────────────────────────────────────────────────
 class Entity:
-    __slots__ = ['x', 'y', 'vx', 'vy', 'age', 'wander_cd']
+    __slots__ = ['x', 'y', 'vx', 'vy', 'age', 'wander_cd', 'state', 'target_x', 'target_y', 'state_cd', 'is_prey']
 
-    def __init__(self, x, y):
+    def __init__(self, x, y, is_prey=False):
         self.x = float(x)
         self.y = float(y)
         angle = random.uniform(0, math.tau)
         self.vx = math.cos(angle)
         self.vy = math.sin(angle)
         self.age = random.uniform(0, 15)
-        self.wander_cd = random.uniform(0, 6)
+        self.wander_cd  = random.uniform(0, 6)
+        self.state      = S_WANDER
+        self.target_x   = x
+        self.target_y   = y
+        self.state_cd   = random.uniform(0, 8)
+        self.is_prey    = is_prey
 
 
 class Settlement:
@@ -66,27 +79,27 @@ class Settlement:
 
 # ── Main simulation class ──────────────────────────────────────────────────
 class Simulation:
-    """
-    Two modes:
-      epoch=False  (default) — interactive desktop, manual time control.
-      epoch=True             — persistent web mode, year driven by real clock.
-                               All viewers see the same year simultaneously.
-    """
-
     def __init__(self, tiles, epoch=False):
         self.tiles   = tiles
         self.epoch   = epoch
         self.paused  = False
 
-        # free-play controls
         self.speed_idx     = DEFAULT_SPEED_IDX
         self._era_idx      = 0
         self._settle_cd    = 0.0
 
-        self.entities    = []
+        self.entities    = []   # humans
+        self.prey        = []   # animals
         self.settlements = []
-        self.events      = []          # (year, text) full history
-        self._active_events = []       # (text, remaining_sec) for HUD
+        self.events      = []
+        self._active_events = []
+
+        # Pre-cache walkable tiles and water-adjacent tiles for AI targets
+        self._walkable   = [(x, y) for x in range(WORLD_W) for y in range(WORLD_H)
+                            if TILE_WALKABLE.get(tiles[x][y], False)]
+        self._water_adj  = self._find_water_adjacent()
+        self._food_tiles = [(x, y) for x, y in self._walkable
+                            if tiles[x][y] in (T_FOREST, T_GRASS)]
 
         if epoch:
             self._site_schedule = _precompute_sites(tiles)
@@ -95,8 +108,9 @@ class Simulation:
         else:
             self.year = 0.0
             self._spawn_initial()
+            self._spawn_prey(20)
 
-    # ── public ──────────────────────────────────────────────────────────
+    # ── public ────────────────────────────────────────────────────────────
 
     def get_era(self):
         idx = 0
@@ -123,146 +137,160 @@ class Simulation:
     def update(self, dt):
         if self.epoch:
             new_year = _epoch_year()
-            dy = new_year - self.year
-            if dy <= 0:
-                # still animate entities even if year hasn't changed
-                self._animate_entities(0.016)
-                return
-            self.year = new_year
-            self._epoch_update(dy)
+            dy_game  = new_year - self.year
+            # Animate at real-time speed regardless of game-year change
+            self._animate_all(dt)
+            if dy_game > 0:
+                self.year = new_year
+                self._epoch_update(dy_game)
         else:
             if self.paused:
                 return
-            dy = dt * TIME_SPEEDS[self.speed_idx]
-            self.year += dy
-            self._update_entities(dy)
-            self._update_reproduction(dy)
-            self._update_settlements(dy)
+            dy_game = dt * TIME_SPEEDS[self.speed_idx]
+            self.year += dy_game
+            self._update_entities(dy_game)
+            self._update_prey(dy_game)
+            self._update_reproduction(dy_game)
+            self._update_settlements(dy_game)
             self._check_era_transition()
+            self._settle_cd = max(0.0, self._settle_cd - dy_game)
 
         self._active_events = [
             (t, r - dt) for t, r in self._active_events if r - dt > 0
         ]
 
-    # ── epoch-mode helpers ────────────────────────────────────────────────
+    # ── animation (real-time, both modes) ─────────────────────────────────
 
-    def _bootstrap_epoch(self):
-        """Activate all settlements that should already exist at current year."""
-        for (fy, gx, gy) in self._site_schedule:
-            if fy <= self.year:
-                s = Settlement(gx, gy, fy)
-                s.level = _site_level(fy, self.year, self.get_era()[0])
-                self.settlements.append(s)
+    def _animate_all(self, dt):
+        """Move entities and prey at real-time speed for smooth visuals."""
+        era_idx  = self._era_idx
+        speed    = 2.5 + era_idx * 0.3   # world units per real second
+        move_d   = dt * speed
+        tiles    = self.tiles
 
-        self._populate_entities_epoch()
-        era_idx = self.get_era()[0]
-        self._era_idx = era_idx
-
-    def _epoch_update(self, dy):
-        era_idx, _ = self.get_era()
-
-        # Activate newly founded settlements
-        for (fy, gx, gy) in self._site_schedule:
-            if self.year - dy < fy <= self.year:
-                s = Settlement(gx, gy, fy)
-                s.level = 0
-                self.settlements.append(s)
-                msg = random.choice(_SETTLE_MSGS[min(era_idx, len(_SETTLE_MSGS)-1)])
-                self._add_event(msg)
-
-        # Update settlement levels
-        for s in self.settlements:
-            s.level = _site_level(s.founded_year, self.year, era_idx)
-
-        # Sync entity count to expected population
-        expected = _expected_population(self.year)
-        current  = len(self.entities)
-        if current < expected:
-            self._populate_entities_epoch(expected - current)
-        elif current > expected + 50:
-            del self.entities[expected:]
-
-        self._animate_entities(dy * 0.005)   # slow drift
-        self._check_era_transition()
-
-    def _populate_entities_epoch(self, count=None):
-        """Spawn entities near active settlements (or scattered if none)."""
-        target = _expected_population(self.year) if count is None else count
-        tiles  = self.tiles
-
-        if self.settlements:
-            for _ in range(target):
-                s = random.choice(self.settlements)
-                r = random.gauss(0, 5)
-                angle = random.uniform(0, math.tau)
-                x = max(0.5, min(WORLD_W - 0.51, s.gx + math.cos(angle) * abs(r)))
-                y = max(0.5, min(WORLD_H - 0.51, s.gy + math.sin(angle) * abs(r)))
-                if TILE_WALKABLE.get(tiles[int(x)][int(y)], False):
-                    self.entities.append(Entity(x, y))
-        else:
-            cx, cy = WORLD_W // 2, WORLD_H // 2
-            for _ in range(target):
-                x = max(0.5, min(WORLD_W - 0.51, cx + random.uniform(-12, 12)))
-                y = max(0.5, min(WORLD_H - 0.51, cy + random.uniform(-12, 12)))
-                if TILE_WALKABLE.get(tiles[int(x)][int(y)], False):
-                    self.entities.append(Entity(x, y))
-
-    def _animate_entities(self, move_dist):
-        """Visually drift entities — cosmetic only, no birth/death in epoch mode."""
-        tiles = self.tiles
         for e in self.entities:
-            e.wander_cd -= 0.016
+            self._move_entity(e, move_d, tiles, era_idx, hunt_prey=True)
+        for p in self.prey:
+            self._move_prey(p, move_d, tiles)
+
+    # ── entity AI ─────────────────────────────────────────────────────────
+
+    def _move_entity(self, e, move_d, tiles, era_idx, hunt_prey=False):
+        e.state_cd -= 0.016
+        e.wander_cd -= 0.016
+
+        # Choose new goal
+        if e.state_cd <= 0:
+            roll = random.random()
+            if hunt_prey and self.prey and era_idx < 7 and roll < 0.25:
+                # Hunt: target a nearby prey
+                nearest = min(self.prey,
+                              key=lambda p: (p.x - e.x)**2 + (p.y - e.y)**2,
+                              default=None)
+                if nearest:
+                    e.state    = S_HUNT
+                    e.target_x = nearest.x
+                    e.target_y = nearest.y
+                    e.state_cd = random.uniform(4, 10)
+            elif self._water_adj and roll < 0.45:
+                # Drink: head to water
+                tx, ty = random.choice(self._water_adj[:20])
+                e.state    = S_DRINK
+                e.target_x = tx + 0.5
+                e.target_y = ty + 0.5
+                e.state_cd = random.uniform(6, 12)
+            elif self._food_tiles and roll < 0.65:
+                # Gather food
+                tx, ty = random.choice(self._food_tiles[:40])
+                e.state    = S_GATHER
+                e.target_x = tx + 0.5
+                e.target_y = ty + 0.5
+                e.state_cd = random.uniform(5, 10)
+            else:
+                e.state    = S_WANDER
+                e.state_cd = random.uniform(4, 8)
+
+        if e.state in (S_HUNT, S_DRINK, S_GATHER):
+            # Move toward target
+            dx = e.target_x - e.x
+            dy = e.target_y - e.y
+            dist = math.sqrt(dx * dx + dy * dy) + 0.001
+            if dist < 0.8:
+                e.state = S_WANDER
+            else:
+                e.vx = dx / dist
+                e.vy = dy / dist
+        else:
+            # Wander: change direction occasionally
             if e.wander_cd <= 0:
                 angle = random.uniform(0, math.tau)
                 e.vx = math.cos(angle)
                 e.vy = math.sin(angle)
-                e.wander_cd = random.uniform(3, 9)
-            nx = max(0.5, min(WORLD_W - 0.51, e.x + e.vx * move_dist))
-            ny = max(0.5, min(WORLD_H - 0.51, e.y + e.vy * move_dist))
-            if TILE_WALKABLE.get(tiles[int(nx)][int(ny)], False):
-                e.x, e.y = nx, ny
-            else:
+                e.wander_cd = random.uniform(2, 6)
+
+        self._apply_move(e, move_d, tiles)
+
+    def _move_prey(self, p, move_d, tiles):
+        # Check if a human is nearby → flee
+        for e in self.entities[:10]:   # sample for performance
+            dx = e.x - p.x
+            dy = e.y - p.y
+            if dx*dx + dy*dy < 16:
+                angle = math.atan2(dy, dx) + math.pi
+                p.vx = math.cos(angle)
+                p.vy = math.sin(angle)
+                p.state = S_FLEE
+                p.state_cd = 3.0
+                break
+
+        p.state_cd -= 0.016
+        if p.state == S_FLEE and p.state_cd <= 0:
+            p.state = S_WANDER
+        if p.state == S_WANDER:
+            p.wander_cd -= 0.016
+            if p.wander_cd <= 0:
                 angle = random.uniform(0, math.tau)
-                e.vx, e.vy = math.cos(angle), math.sin(angle)
+                p.vx = math.cos(angle)
+                p.vy = math.sin(angle)
+                p.wander_cd = random.uniform(3, 8)
 
-    # ── free-play helpers ─────────────────────────────────────────────────
+        flee_mult = 1.8 if p.state == S_FLEE else 0.9
+        self._apply_move(p, move_d * flee_mult, tiles)
 
-    def _spawn_initial(self):
-        cx, cy = WORLD_W // 2, WORLD_H // 2
-        candidates = [
-            (x, y)
-            for x in range(cx - 12, cx + 12)
-            for y in range(cy - 12, cy + 12)
-            if (0 <= x < WORLD_W and 0 <= y < WORLD_H
-                and TILE_WALKABLE.get(self.tiles[x][y], False))
-        ]
-        random.shuffle(candidates)
-        for gx, gy in candidates[:15]:
-            self.entities.append(Entity(gx + 0.5, gy + 0.5))
+    def _apply_move(self, e, move_d, tiles):
+        nx = max(0.5, min(WORLD_W - 0.51, e.x + e.vx * move_d))
+        ny = max(0.5, min(WORLD_H - 0.51, e.y + e.vy * move_d))
+        if TILE_WALKABLE.get(tiles[int(nx)][int(ny)], False):
+            e.x, e.y = nx, ny
+        else:
+            angle = random.uniform(0, math.tau)
+            e.vx = math.cos(angle)
+            e.vy = math.sin(angle)
+
+    # ── free-play simulation ───────────────────────────────────────────────
 
     def _update_entities(self, dy):
-        move_dist = dy * 0.6
-        tiles = self.tiles
-        dead  = []
+        tiles    = self.tiles
+        era_idx  = self._era_idx
+        move_d   = dy * 0.6
+        dead     = []
         for e in self.entities:
             e.age += dy
-            e.wander_cd -= dy
-            if e.wander_cd <= 0:
-                angle = random.uniform(0, math.tau)
-                e.vx = math.cos(angle)
-                e.vy = math.sin(angle)
-                e.wander_cd = random.uniform(3, 9)
-            nx = max(0.5, min(WORLD_W - 0.51, e.x + e.vx * move_dist))
-            ny = max(0.5, min(WORLD_H - 0.51, e.y + e.vy * move_dist))
-            if TILE_WALKABLE.get(tiles[int(nx)][int(ny)], False):
-                e.x, e.y = nx, ny
-            else:
-                angle = random.uniform(0, math.tau)
-                e.vx, e.vy = math.cos(angle), math.sin(angle)
+            self._move_entity(e, move_d, tiles, era_idx, hunt_prey=True)
             if e.age > 55 + random.uniform(-8, 15):
                 dead.append(e)
         for e in dead:
             self.entities.remove(e)
+
+    def _update_prey(self, dy):
+        tiles  = self.tiles
+        move_d = dy * 0.8
+        for p in self.prey:
+            self._move_prey(p, move_d, tiles)
+        # Replenish prey
+        era_idx = self._era_idx
+        if len(self.prey) < max(5, 30 - era_idx * 3):
+            self._spawn_prey(1)
 
     def _update_reproduction(self, dy):
         pop = len(self.entities)
@@ -290,7 +318,6 @@ class Simulation:
     def _update_settlements(self, dy):
         era_idx, _ = self.get_era()
         if era_idx < 1 or self._settle_cd > 0:
-            self._settle_cd = max(0.0, self._settle_cd - dy)
             return
         density = {}
         for e in self.entities:
@@ -324,6 +351,96 @@ class Simulation:
                     s.level = lvl
                     break
 
+    # ── epoch mode ────────────────────────────────────────────────────────
+
+    def _bootstrap_epoch(self):
+        for (fy, gx, gy) in self._site_schedule:
+            if fy <= self.year:
+                s = Settlement(gx, gy, fy)
+                s.level = _site_level(fy, self.year, self.get_era()[0])
+                self.settlements.append(s)
+        self._era_idx = self.get_era()[0]
+        self._populate_entities_epoch()
+        self._spawn_prey(max(5, 25 - self._era_idx * 2))
+
+    def _epoch_update(self, dy):
+        era_idx, _ = self.get_era()
+        for (fy, gx, gy) in self._site_schedule:
+            if self.year - dy < fy <= self.year:
+                s = Settlement(gx, gy, fy)
+                s.level = 0
+                self.settlements.append(s)
+                msg = random.choice(_SETTLE_MSGS[min(era_idx, len(_SETTLE_MSGS)-1)])
+                self._add_event(msg)
+        for s in self.settlements:
+            s.level = _site_level(s.founded_year, self.year, era_idx)
+        expected = _expected_population(self.year)
+        current  = len(self.entities)
+        if current < expected:
+            self._populate_entities_epoch(expected - current)
+        elif current > expected + 50:
+            del self.entities[expected:]
+        prey_target = max(5, 25 - era_idx * 2)
+        if len(self.prey) < prey_target:
+            self._spawn_prey(prey_target - len(self.prey))
+        elif len(self.prey) > prey_target + 5:
+            del self.prey[prey_target:]
+        self._check_era_transition()
+
+    def _populate_entities_epoch(self, count=None):
+        target = _expected_population(self.year) if count is None else count
+        tiles  = self.tiles
+        if self.settlements:
+            for _ in range(target):
+                s = random.choice(self.settlements)
+                angle = random.uniform(0, math.tau)
+                r = abs(random.gauss(0, 5))
+                x = max(0.5, min(WORLD_W - 0.51, s.gx + math.cos(angle) * r))
+                y = max(0.5, min(WORLD_H - 0.51, s.gy + math.sin(angle) * r))
+                if TILE_WALKABLE.get(tiles[int(x)][int(y)], False):
+                    self.entities.append(Entity(x, y))
+        else:
+            cx, cy = WORLD_W // 2, WORLD_H // 2
+            for _ in range(target):
+                x = max(0.5, min(WORLD_W - 0.51, cx + random.uniform(-14, 14)))
+                y = max(0.5, min(WORLD_H - 0.51, cy + random.uniform(-14, 14)))
+                if TILE_WALKABLE.get(tiles[int(x)][int(y)], False):
+                    self.entities.append(Entity(x, y))
+
+    # ── shared helpers ─────────────────────────────────────────────────────
+
+    def _spawn_initial(self):
+        cx, cy = WORLD_W // 2, WORLD_H // 2
+        candidates = [
+            (x, y)
+            for x in range(cx - 12, cx + 12)
+            for y in range(cy - 12, cy + 12)
+            if (0 <= x < WORLD_W and 0 <= y < WORLD_H
+                and TILE_WALKABLE.get(self.tiles[x][y], False))
+        ]
+        random.shuffle(candidates)
+        for gx, gy in candidates[:15]:
+            self.entities.append(Entity(gx + 0.5, gy + 0.5))
+
+    def _spawn_prey(self, n=1):
+        for _ in range(n):
+            if self._food_tiles:
+                gx, gy = random.choice(self._food_tiles)
+                self.prey.append(Entity(gx + random.uniform(0.2, 0.8),
+                                        gy + random.uniform(0.2, 0.8),
+                                        is_prey=True))
+
+    def _find_water_adjacent(self):
+        result = []
+        for x, y in self._walkable:
+            for dx, dy in ((-1,0),(1,0),(0,-1),(0,1)):
+                nx, ny = x+dx, y+dy
+                if 0 <= nx < WORLD_W and 0 <= ny < WORLD_H:
+                    if self.tiles[nx][ny] in (T_WATER, T_DEEP_WATER):
+                        result.append((x, y))
+                        break
+        return result
+
     def _check_era_transition(self):
         era_idx, era = self.get_era()
         if era_idx > self._era_idx:
@@ -342,11 +459,10 @@ def _epoch_year():
 
 
 def _expected_population(year):
-    """Smooth logistic formula for visual population count."""
     max_pop = 600
     k       = 0.0006
     mid     = 5000
-    return max(8, int(max_pop / (1 + math.exp(-k * (year - mid)))))
+    return max(10, int(max_pop / (1 + math.exp(-k * (year - mid)))))
 
 
 def _site_level(founded_year, current_year, era_idx):
@@ -360,12 +476,7 @@ def _site_level(founded_year, current_year, era_idx):
 
 
 def _precompute_sites(tiles, seed=42, max_sites=45):
-    """
-    Deterministically pre-generate settlement positions and founding years.
-    Everyone running with the same seed sees the same world.
-    """
     rng = random.Random(seed + 0xDEAD)
-
     candidates = [
         (x, y)
         for x in range(WORLD_W)
@@ -373,7 +484,6 @@ def _precompute_sites(tiles, seed=42, max_sites=45):
         if tiles[x][y] in (T_GRASS, T_SAND, T_FOREST, T_HIGHLAND)
     ]
     rng.shuffle(candidates)
-
     sites = []
     occupied = []
     for x, y in candidates:
@@ -383,12 +493,9 @@ def _precompute_sites(tiles, seed=42, max_sites=45):
             continue
         sites.append((x, y))
         occupied.append((x, y))
-
-    # Assign founding years: first at year 1000, then every ~150-300 years
     schedule = []
     year = 1000.0
     for (x, y) in sites:
         schedule.append((year, x, y))
         year += rng.uniform(120, 280)
-
     return schedule
