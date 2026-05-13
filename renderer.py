@@ -10,6 +10,26 @@ _BAR_SURF  = None
 _BOT_SURF  = None
 _INFO_BG   = None
 
+# ── Settlement multi-building layouts ────────────────────────────────────────
+# Each entry: list of (dx, dy, building_variant) relative to settlement center.
+# building_variant maps to _draw_building() level parameter.
+_SETTLE_LAYOUTS = {
+    0: [(0, 0, 0)],
+    1: [(0, 0, 1)],
+    2: [(-1,  0, 1), ( 1,  1, 1),
+        ( 0,  0, 2)],
+    3: [(-2, -1, 1), ( 2, -1, 1), ( 0, -2, 1),
+        (-1,  2, 1), ( 1,  2, 1),
+        ( 0,  0, 3)],
+    4: [(-3,  0, 2), ( 3,  0, 2), ( 0, -3, 2), ( 0,  3, 2),
+        (-2, -2, 1), ( 2, -2, 1), (-2,  2, 1), ( 2,  2, 1),
+        ( 0,  0, 4)],
+    5: [(-4, -1, 3), ( 4, -1, 3), (-1, -4, 3), ( 1, -4, 3),
+        (-3,  2, 3), ( 3,  2, 3), (-1,  3, 3), ( 1,  3, 3),
+        (-2, -2, 2), ( 2, -2, 2), (-2,  1, 2), ( 2,  1, 2),
+        ( 0,  0, 5)],
+}
+
 
 # ───────────────────────────── colour helpers ────────────────────────────────
 
@@ -518,6 +538,94 @@ def _draw_clan_campfires(surface, sim, cam_x, cam_y, zoom, tick, is_night):
                                    (wx_s, wy_s), max(1, int(z * (1.5 - i*0.4))))
 
 
+# ───────────────────────────── settlement overlays ───────────────────────────
+
+def _draw_settlement_roads(surface, s, cam_x, cam_y, zoom):
+    """Dirt roads from center to each satellite building."""
+    if s.level < 1 or zoom < 0.35:
+        return
+    layout = _SETTLE_LAYOUTS.get(min(s.level, 5), _SETTLE_LAYOUTS[5])
+    cx, cy = s.gx + 0.5, s.gy + 0.5
+    scx, scy = world_to_screen(cx, cy, cam_x, cam_y, zoom)
+    road_w = max(1, int(2.5 * zoom))
+    road_col = (128, 105, 68)
+    for dx, dy, _ in layout:
+        if dx == 0 and dy == 0:
+            continue
+        tx, ty = world_to_screen(cx + dx, cy + dy, cam_x, cam_y, zoom)
+        if (-20 < tx < SCREEN_W + 20) or (-20 < scx < SCREEN_W + 20):
+            pygame.draw.line(surface, road_col, (scx, scy), (tx, ty), road_w)
+
+
+def _draw_settlement_walls(surface, s, cam_x, cam_y, zoom):
+    """Isometric palisade / stone walls for level 3+."""
+    if s.level < 3 or zoom < 0.30:
+        return
+    wall_r = 3 + s.level
+    cx, cy = s.gx + 0.5, s.gy + 0.5
+    pts = [
+        world_to_screen(cx,        cy - wall_r, cam_x, cam_y, zoom),
+        world_to_screen(cx + wall_r, cy,        cam_x, cam_y, zoom),
+        world_to_screen(cx,        cy + wall_r, cam_x, cam_y, zoom),
+        world_to_screen(cx - wall_r, cy,        cam_x, cam_y, zoom),
+    ]
+    # Cull if entirely off screen
+    if all(sx < -10 or sx > SCREEN_W + 10 for sx, sy in pts):
+        return
+    wall_w = max(1, int(3 * zoom))
+    if s.level == 3:
+        col_outer = (105, 90, 68)
+        col_inner = (128, 110, 82)
+    elif s.level == 4:
+        col_outer = (115, 108, 95)
+        col_inner = (138, 130, 115)
+    else:
+        col_outer = (130, 125, 118)
+        col_inner = (158, 152, 142)
+    pygame.draw.polygon(surface, col_outer, pts, wall_w + 1)
+    pygame.draw.polygon(surface, col_inner, pts, max(1, wall_w - 1))
+    # Corner towers for level 4+
+    if s.level >= 4 and zoom >= 0.5:
+        tower_r = max(2, int(4 * zoom))
+        for sx, sy in pts:
+            pygame.draw.circle(surface, col_inner, (sx, sy), tower_r)
+            pygame.draw.circle(surface, (180, 175, 162), (sx, sy), max(1, tower_r - 1))
+            if s.level >= 5 and zoom >= 0.8:
+                pygame.draw.line(surface, (140, 132, 120),
+                                 (sx, sy - tower_r), (sx, sy - tower_r * 3),
+                                 max(1, wall_w - 1))
+
+
+def _draw_settlement_labels(surface, settlements, era_idx, cam_x, cam_y, zoom, fonts):
+    """Floating name labels above each settlement of level >= 1."""
+    if zoom < 0.4:
+        return
+    for s in settlements:
+        if s.level < 1:
+            continue
+        scx, scy = world_to_screen(s.gx + 0.5, s.gy + 0.5, cam_x, cam_y, zoom)
+        if scx < -80 or scx > SCREEN_W + 80:
+            continue
+        # Float above the tallest building (rough estimate)
+        label_y = scy - int(34 * zoom) - (s.level * max(1, int(5 * zoom)))
+        if label_y < -20 or label_y > SCREEN_H + 20:
+            continue
+        name_s = fonts['sm'].render(s.name, True, (240, 225, 170))
+        nx = scx - name_s.get_width() // 2
+        pad = 4
+        bg = (nx - pad, label_y - 2,
+              name_s.get_width() + pad * 2, name_s.get_height() + 4)
+        pygame.draw.rect(surface, (15, 12, 8), bg, border_radius=3)
+        pygame.draw.rect(surface, (180, 155, 90), bg, 1, border_radius=3)
+        surface.blit(name_s, (nx, label_y))
+        # Population dot indicator
+        if zoom >= 0.7 and s.population > 0:
+            pop_txt = f"♟ {s.population}"
+            pop_s = fonts['sm'].render(pop_txt, True, (160, 190, 140))
+            surface.blit(pop_s, (scx - pop_s.get_width() // 2,
+                                 label_y + name_s.get_height() + 2))
+
+
 # ───────────────────────────── main render ───────────────────────────────────
 
 def render(surface, sim, tiles, camera, fonts, tick, selected_entity=None):
@@ -550,16 +658,34 @@ def render(surface, sim, tiles, camera, fonts, tick, selected_entity=None):
             gy = diag - gx
             _draw_tile(surface, gx, gy, tiles[gx][gy], cam_x, cam_y, zoom)
 
-    # ── buildings ──
-    settle_map = {(s.gx, s.gy): s for s in sim.settlements}
+    # ── expand settlement layouts into per-tile building map ──
+    building_map = {}   # (gx, gy) → (settlement, building_variant_level)
+    for s in sim.settlements:
+        layout = _SETTLE_LAYOUTS.get(min(s.level, 5), _SETTLE_LAYOUTS[5])
+        for dx, dy, blvl in layout:
+            bx = max(0, min(WORLD_W - 1, s.gx + dx))
+            by = max(0, min(WORLD_H - 1, s.gy + dy))
+            if (bx, by) not in building_map:
+                building_map[(bx, by)] = (s, blvl)
+
+    # ── roads (drawn under buildings so buildings overlap them) ──
+    for s in sim.settlements:
+        _draw_settlement_roads(surface, s, cam_x, cam_y, zoom)
+
+    # ── buildings in diagonal painter-algorithm order ──
     for diag in range(WORLD_W + WORLD_H - 1):
         x0 = max(0, diag - WORLD_H + 1)
         x1 = min(WORLD_W, diag + 1)
         for gx in range(x0, x1):
             gy = diag - gx
-            s = settle_map.get((gx, gy))
-            if s:
-                _draw_building(surface, gx, gy, s.level, era_idx, cam_x, cam_y, zoom, tick)
+            entry = building_map.get((gx, gy))
+            if entry:
+                s, blvl = entry
+                _draw_building(surface, gx, gy, blvl, era_idx, cam_x, cam_y, zoom, tick)
+
+    # ── settlement walls (drawn over buildings, under entities) ──
+    for s in sim.settlements:
+        _draw_settlement_walls(surface, s, cam_x, cam_y, zoom)
 
     # ── era-0 campfires: drawn at clan anchor spots when it's night ──
     if era_idx == 0:
@@ -594,6 +720,9 @@ def render(surface, sim, tiles, camera, fonts, tick, selected_entity=None):
     if selected_entity is not None:
         sx, sy = world_to_screen(selected_entity.x, selected_entity.y, cam_x, cam_y, zoom)
         _draw_nametag(surface, sx, sy, selected_entity, era_idx, zoom, fonts)
+
+    # ── settlement name labels (always on top of entities) ──
+    _draw_settlement_labels(surface, sim.settlements, era_idx, cam_x, cam_y, zoom, fonts)
 
     # ── UI ──
     _draw_ui(surface, sim, era_idx, era, fonts, camera.zoom)

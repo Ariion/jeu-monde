@@ -163,13 +163,52 @@ class Entity:
         return ", ".join(parts)
 
 
+# ── Settlement name pools (one per era) ──────────────────────────────────────
+_SETTLE_NAME_POOLS = [
+    ["Camp du Mammouth","Tanière des Ours","Abri de la Rivière","Camp des Chasseurs",
+     "Foyer du Clan","Grotte des Anciens","Camp du Cerf","Halte des Nomades",
+     "Bivouac du Clan","Camp des Braves"],
+    ["Hameau de Pierre","Village du Lac","Camp Fortifié","Huttes du Fleuve",
+     "Village des Bois","Hameau de l'Aurore","Camp des Premiers","Village des Plaines",
+     "Fond du Vallon","Rive des Bois"],
+    ["Ur","Kish","Nippur","Lagash","Eridu","Uruk","Sippar",
+     "Memphis","Thèbes","Knossos","Mycènes","Troie","Jéricho","Petra","Akad"],
+    ["Athènes","Sparte","Corinthe","Éphèse","Rome","Carthage",
+     "Alexandrie","Pergame","Syracuse","Palmyre","Lugdunum","Massalia",
+     "Tolosa","Lugdunum","Aquilée"],
+    ["Castillon","Beaumont","Montfort","Saint-Gilles","Rochefort",
+     "Villefranche","Novgorod","Bruges","Reims","Chartres",
+     "Orléans","Carcassonne","Avignon","Laon","Metz"],
+    ["Florentia","Venezia","Siena","Genova","Padova","Mantua",
+     "Ferrara","Pisa","Lucca","Brescia","Milano","Napoli",
+     "Perugia","Urbino","Ravenna"],
+    ["Grandport","Fermont","Charbonnière","Bellevue","Neustadt",
+     "Nouveau Havre","Charbon-sur-Mer","Vapeur","Rouille",
+     "Forgemont","Aciéria","Cheminée"],
+    ["Métropolis","Nova-Crest","Skyport","Néopolis","Digitalburg",
+     "Infoplex","Neuronopolis","Byteville","Megacité","Cybervil",
+     "Dataport","Réseau Prime"],
+    ["Nexus-7","Station Aria","Hub Quantum","Cluster Ω","Nœud Lumière",
+     "Complexe Helix","Noyau Zeta","Réseau Alpha","Matrice","Singularité"],
+    ["Cité des Étoiles","Colonie Aurora","Station Solaris","Monde Nouveau",
+     "Anneau de Kepler","L'Origine","Éden Orbital","Nexus Galactique",
+     "Berceau Stellaire","La Confluence"],
+]
+
+def _gen_settlement_name(era_idx, seed):
+    pool = _SETTLE_NAME_POOLS[min(era_idx, len(_SETTLE_NAME_POOLS)-1)]
+    return pool[abs(seed) % len(pool)]
+
+
 class Settlement:
-    def __init__(self, gx, gy, founded_year):
+    def __init__(self, gx, gy, founded_year, era_idx=0):
         self.gx = gx
         self.gy = gy
         self.founded_year = founded_year
-        self.population = 0
-        self.level = 0
+        self.population   = 0
+        self.level        = 0
+        self._prev_level  = -1
+        self.name         = _gen_settlement_name(era_idx, gx * 97 + gy * 31)
 
 
 # ── Simulation ────────────────────────────────────────────────────────────
@@ -721,7 +760,7 @@ class Simulation:
         # If enough wood accumulated and no settlement too close → found one
         if self._build_progress.get(key, 0) >= 8:
             if not any(abs(s.gx - bx) + abs(s.gy - by) < 12 for s in self.settlements):
-                s = Settlement(bx + 2, by + 2, self.year)
+                s = Settlement(bx + 2, by + 2, self.year, era_idx)
                 self.settlements.append(s)
                 self._add_event(
                     random.choice(_SETTLE_MSGS[min(era_idx, len(_SETTLE_MSGS)-1)]))
@@ -773,7 +812,7 @@ class Simulation:
             if nbr < threshold: continue
             if (tx, ty) in existing: continue
             if any(abs(s.gx-tx)+abs(s.gy-ty) < 14 for s in self.settlements): continue
-            s = Settlement(tx, ty, self.year)
+            s = Settlement(tx, ty, self.year, era_idx)
             self.settlements.append(s)
             existing.add((tx, ty))
             self._add_event(random.choice(_SETTLE_MSGS[min(era_idx, len(_SETTLE_MSGS)-1)]))
@@ -787,13 +826,44 @@ class Simulation:
             for lvl in range(len(thresholds)-1, -1, -1):
                 if nearby >= thresholds[lvl] and era_idx >= lvl:
                     s.level = lvl; break
+            if s.level > s._prev_level:
+                if s._prev_level >= 0:
+                    self._on_settlement_level_up(s)
+                s._prev_level = s.level
+
+    def _on_settlement_level_up(self, s):
+        """Auto-clear forest around a growing settlement."""
+        radius = 3 + s.level * 2
+        cleared = 0
+        for dx in range(-radius, radius + 1):
+            for dy in range(-radius, radius + 1):
+                if dx * dx + dy * dy > radius * radius:
+                    continue
+                gx, gy = s.gx + dx, s.gy + dy
+                if not (0 <= gx < WORLD_W and 0 <= gy < WORLD_H):
+                    continue
+                if self.tiles[gx][gy] != T_FOREST:
+                    continue
+                self.tiles[gx][gy] = T_GRASS
+                self.cleared_tiles.append((gx, gy, 500.0))
+                key = (gx, gy)
+                self.tile_resources.pop(key, None)
+                fg_key = (gx // 8, gy // 8)
+                bucket = self._forest_grid.get(fg_key, [])
+                if key in bucket:
+                    bucket.remove(key)
+                cleared += 1
+        if cleared > 2:
+            era_idx = self._era_idx
+            self._add_event(
+                f"{s.name} grandit ! La forêt recule.")
 
     # ── epoch mode ────────────────────────────────────────────────────────
 
     def _bootstrap_epoch(self):
         for (fy, gx, gy) in self._site_schedule:
             if fy <= self.year:
-                s = Settlement(gx, gy, fy)
+                s = Settlement(gx, gy, fy, self._era_idx)
                 s.level = _site_level(fy, self.year, self.get_era()[0])
                 self.settlements.append(s)
         self._era_idx = self.get_era()[0]
@@ -804,7 +874,7 @@ class Simulation:
         era_idx, _ = self.get_era()
         for (fy, gx, gy) in self._site_schedule:
             if self.year - dy < fy <= self.year:
-                s = Settlement(gx, gy, fy)
+                s = Settlement(gx, gy, fy, era_idx)
                 s.level = 0
                 self.settlements.append(s)
                 self._add_event(random.choice(_SETTLE_MSGS[min(era_idx, len(_SETTLE_MSGS)-1)]))
