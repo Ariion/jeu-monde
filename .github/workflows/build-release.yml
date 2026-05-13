@@ -1,0 +1,60 @@
+name: Build & Release JeuMonde.exe
+
+on:
+  push:
+    tags:
+      - "v*"          # déclenché sur un tag type v1.0, v1.2.3 …
+  workflow_dispatch:  # ou manuellement depuis l'onglet Actions
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Installer Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Installer les dépendances
+        run: pip install pygame pyinstaller
+
+      - name: Compiler l'exécutable
+        run: >
+          pyinstaller
+          --onefile
+          --windowed
+          --name JeuMonde
+          --clean
+          main.py
+
+      - name: Vérifier que le .exe existe
+        run: Test-Path dist\JeuMonde.exe
+        shell: powershell
+
+      - name: Publier dans les Releases GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/JeuMonde.exe
+          name: "Jeu Monde ${{ github.ref_name }}"
+          body: |
+            ## Jeu Monde — Simulateur d'évolution
+
+            Télécharge **JeuMonde.exe** et double-clique. Aucune installation requise.
+
+            ### Contrôles
+            | Touche | Action |
+            |--------|--------|
+            | `ESPACE` | Pause / Reprendre |
+            | `+` / `-` | Accélérer / Ralentir le temps |
+            | `ZQSD` ou Flèches | Déplacer la caméra |
+            | `ÉCHAP` | Quitter |
+
+            ### Ères
+            Préhistoire → Pierre → Bronze → Antiquité → Moyen-Âge → Renaissance → Industrie → Moderne → Futur Proche → Futur Lointain
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
