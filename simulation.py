@@ -3,7 +3,7 @@ import math
 import time as _time
 from config import (WORLD_W, WORLD_H, ERAS, TIME_SPEEDS, DEFAULT_SPEED_IDX,
                     TILE_WALKABLE, T_GRASS, T_SAND, T_FOREST, T_HIGHLAND,
-                    T_WATER, T_DEEP_WATER,
+                    T_MOUNTAIN, T_WATER, T_DEEP_WATER,
                     EPOCH_TIMESTAMP, YEARS_PER_SECOND)
 
 # ── Era-based name pools ──────────────────────────────────────────────────
@@ -38,18 +38,20 @@ S_GATHER  = 3
 S_REST    = 4
 S_FOLLOW  = 5   # children following parent
 S_FLEE    = 6   # prey fleeing
-S_CHOP    = 7   # chop trees / gather wood
-S_BUILD   = 8   # carry wood to shelter site
+S_CHOP    = 7   # chop trees / gather wood  (era ≥ 1)
+S_BUILD   = 8   # carry wood to shelter site (era ≥ 1)
+S_SHELTER = 9   # seek natural shelter — forest, highland, cave (era 0)
 
 _ACTIVITY_LABELS = {
-    S_WANDER: "Explore",
-    S_HUNT:   "Chasse",
-    S_DRINK:  "Va boire",
-    S_GATHER: "Cueille",
-    S_REST:   "Se repose",
-    S_FOLLOW: "Suit le parent",
-    S_CHOP:   "Coupe du bois",
-    S_BUILD:  "Construit",
+    S_WANDER:  "Explore",
+    S_HUNT:    "Chasse",
+    S_DRINK:   "Va boire",
+    S_GATHER:  "Cueille",
+    S_REST:    "Se repose",
+    S_FOLLOW:  "Suit le parent",
+    S_CHOP:    "Coupe du bois",
+    S_BUILD:   "Construit",
+    S_SHELTER: "Cherche un abri",
 }
 
 _eid_counter = 0
@@ -144,8 +146,9 @@ class Entity:
             S_GATHER: _GATHER_DESC[ei],
             S_REST:   _REST_DESC[ei],
             S_FOLLOW: ["Suit ses aînés", "Reste près de sa famille", "Apprend à marcher"],
-            S_CHOP:   _CHOP_DESC[min(ei, len(_CHOP_DESC)-1)],
-            S_BUILD:  _BUILD_DESC[min(ei, len(_BUILD_DESC)-1)],
+            S_CHOP:    _CHOP_DESC[min(ei, len(_CHOP_DESC)-1)],
+            S_BUILD:   _BUILD_DESC[min(ei, len(_BUILD_DESC)-1)],
+            S_SHELTER: _SHELTER_DESC,
         }
         pool = labels.get(self.state, _WANDER_DESC[ei])
         self.activity_desc = random.choice(pool)
@@ -193,8 +196,11 @@ class Simulation:
         self._water_adj  = [(x,y) for x,y in self._walkable
                             if any((x+dx,y+dy) in water_set
                                    for dx,dy in ((-1,0),(1,0),(0,-1),(0,1)))]
-        self._food_tiles = [(x,y) for x,y in self._walkable
-                            if tiles[x][y] in (T_FOREST, T_GRASS)]
+        self._food_tiles    = [(x,y) for x,y in self._walkable
+                               if tiles[x][y] in (T_FOREST, T_GRASS)]
+        # Prehistoric shelter: forests and highland edges (cave analogs)
+        self._shelter_tiles = [(x,y) for x in range(WORLD_W) for y in range(WORLD_H)
+                               if tiles[x][y] in (T_FOREST, T_HIGHLAND)]
         # Terraforming: wood remaining per forest tile (4 chops to clear)
         self.tile_resources  = {
             (x, y): 5
@@ -367,6 +373,12 @@ class Simulation:
         if e.state == S_BUILD and e.inv_wood > 0:
             self._try_build(e)
 
+        # Natural shelter: faster energy recovery in forest/highland
+        if e.state == S_SHELTER:
+            if t in (T_FOREST, T_HIGHLAND):
+                e.energy = min(1.0, e.energy + 0.055)   # quicker than resting alone
+                e.hunger = max(0.0, e.hunger - 0.015)
+
         # Resting
         if e.state == S_REST:
             e.hunger = max(0.0, e.hunger - 0.02)
@@ -374,8 +386,8 @@ class Simulation:
     def _choose_goal(self, e, era_idx, parents):
         if e.is_prey: return
 
-        # Interrupt current task if arms are full of wood → go build now
-        if e.inv_wood >= 5 and e.state not in (S_BUILD, S_DRINK):
+        # Interrupt current task if arms are full of wood → go build now (era 1+)
+        if era_idx >= 1 and e.inv_wood >= 5 and e.state not in (S_BUILD, S_DRINK):
             tx, ty     = self._find_build_spot(e)
             e.state    = S_BUILD
             e.target_x = tx
@@ -429,71 +441,114 @@ class Simulation:
             if e.state != prev: e._refresh_activity(era_idx)
             return
 
-        # Adults: need-driven priority
-        if e.thirst > 0.55:
-            # Urgent thirst
-            e.state    = S_DRINK
-            e.target_x = e.mem_water_x
-            e.target_y = e.mem_water_y
-            e.state_cd = random.uniform(6, 14)
+        # ── ERA 0 : Préhistoire — survie pure, abri naturel ──────────────────
+        if era_idx == 0:
+            if e.thirst > 0.55:
+                e.state    = S_DRINK
+                e.target_x = e.mem_water_x
+                e.target_y = e.mem_water_y
+                e.state_cd = random.uniform(6, 14)
 
-        elif e.inv_wood >= 3:
-            # Loaded with wood → deposit and build immediately
-            tx, ty     = self._find_build_spot(e)
-            e.state    = S_BUILD
-            e.target_x = tx
-            e.target_y = ty
-            e.state_cd = random.uniform(6, 12)
+            elif e.hunger > 0.60 and self.prey:
+                near_prey = [p for p in self.prey
+                             if abs(p.x-e.x) < 16 and abs(p.y-e.y) < 16]
+                if near_prey:
+                    p = min(near_prey, key=lambda p: (p.x-e.x)**2+(p.y-e.y)**2)
+                    e.state    = S_HUNT
+                    e.target_x = p.x
+                    e.target_y = p.y
+                    e.state_cd = random.uniform(5, 14)
+                else:
+                    e.state    = S_GATHER
+                    e.target_x = e.mem_food_x + random.uniform(-4, 4)
+                    e.target_y = e.mem_food_y + random.uniform(-4, 4)
+                    e.state_cd = random.uniform(5, 10)
 
-        elif e.hunger > 0.65 and self.prey and era_idx < 7:
-            # Very hungry → hunt
-            near_prey = [p for p in self.prey
-                         if abs(p.x-e.x) < 14 and abs(p.y-e.y) < 14]
-            if near_prey:
-                p = min(near_prey, key=lambda p: (p.x-e.x)**2+(p.y-e.y)**2)
-                e.state    = S_HUNT
-                e.target_x = p.x
-                e.target_y = p.y
-                e.state_cd = random.uniform(5, 12)
+            elif e.hunger > 0.40:
+                e.state    = S_GATHER
+                e.target_x = e.mem_food_x + random.uniform(-4, 4)
+                e.target_y = e.mem_food_y + random.uniform(-4, 4)
+                e.state_cd = random.uniform(5, 10)
+
+            elif e.energy < 0.40:
+                # Tired → seek natural shelter (forest or highland = cave)
+                target = self._find_shelter_target(e)
+                if target:
+                    e.state    = S_SHELTER
+                    e.target_x, e.target_y = target
+                    e.state_cd = random.uniform(8, 18)
+                else:
+                    e.state    = S_REST
+                    e.state_cd = random.uniform(6, 12)
+
             else:
+                # Wander but stay near clan group, favour forest/highland edges
+                e.state    = S_WANDER
+                e.state_cd = random.uniform(3, 8)
+                # Drift toward group centre
+                clan_mates = [c for c in self.entities
+                              if c.clan_id == e.clan_id and c is not e]
+                if clan_mates and random.random() < 0.35:
+                    cx = sum(c.x for c in clan_mates) / len(clan_mates)
+                    cy = sum(c.y for c in clan_mates) / len(clan_mates)
+                    e.target_x = cx + random.uniform(-6, 6)
+                    e.target_y = cy + random.uniform(-6, 6)
+                elif random.random() < 0.25:
+                    e.target_x = e.mem_food_x + random.uniform(-5, 5)
+                    e.target_y = e.mem_food_y + random.uniform(-5, 5)
+
+        # ── ERA 1+ : premiers outils, construction progressive ───────────────
+        else:
+            if e.thirst > 0.55:
+                e.state    = S_DRINK
+                e.target_x = e.mem_water_x
+                e.target_y = e.mem_water_y
+                e.state_cd = random.uniform(6, 14)
+
+            elif e.hunger > 0.65 and self.prey and era_idx < 7:
+                near_prey = [p for p in self.prey
+                             if abs(p.x-e.x) < 14 and abs(p.y-e.y) < 14]
+                if near_prey:
+                    p = min(near_prey, key=lambda p: (p.x-e.x)**2+(p.y-e.y)**2)
+                    e.state    = S_HUNT
+                    e.target_x = p.x
+                    e.target_y = p.y
+                    e.state_cd = random.uniform(5, 12)
+                else:
+                    e.state    = S_GATHER
+                    e.target_x = e.mem_food_x
+                    e.target_y = e.mem_food_y
+                    e.state_cd = random.uniform(5, 10)
+
+            elif e.energy < 0.25:
+                e.state    = S_REST
+                e.state_cd = random.uniform(6, 14)
+
+            elif e.hunger > 0.45:
                 e.state    = S_GATHER
                 e.target_x = e.mem_food_x
                 e.target_y = e.mem_food_y
                 e.state_cd = random.uniform(5, 10)
 
-        elif e.energy < 0.25:
-            # Exhausted → rest
-            e.state    = S_REST
-            e.state_cd = random.uniform(6, 14)
+            elif era_idx < 8 and random.random() < 0.40:
+                target = self._find_chop_target(e)
+                if target:
+                    e.state    = S_CHOP
+                    e.target_x, e.target_y = target
+                    e.state_cd = random.uniform(5, 10)
+                else:
+                    e.state    = S_WANDER
+                    e.state_cd = random.uniform(4, 9)
 
-        elif e.hunger > 0.45:
-            # Moderately hungry → gather
-            e.state    = S_GATHER
-            e.target_x = e.mem_food_x
-            e.target_y = e.mem_food_y
-            e.state_cd = random.uniform(5, 10)
-
-        elif era_idx < 8 and random.random() < 0.40:
-            # Not hungry/thirsty/exhausted — go chop wood (or build if loaded)
-            target = self._find_chop_target(e)
-            if target:
-                e.state    = S_CHOP
-                e.target_x, e.target_y = target
-                e.state_cd = random.uniform(5, 10)
             else:
                 e.state    = S_WANDER
                 e.state_cd = random.uniform(4, 9)
-
-        else:
-            # Explore / social wander
-            e.state    = S_WANDER
-            e.state_cd = random.uniform(4, 9)
-            if random.random() < 0.2:
-                e.target_x = e.mem_water_x + random.uniform(-5, 5)
-                e.target_y = e.mem_water_y + random.uniform(-5, 5)
-            elif random.random() < 0.2:
-                e.target_x = e.mem_food_x + random.uniform(-5, 5)
-                e.target_y = e.mem_food_y + random.uniform(-5, 5)
+                if random.random() < 0.2:
+                    e.target_x = e.mem_water_x + random.uniform(-5, 5)
+                    e.target_y = e.mem_water_y + random.uniform(-5, 5)
+                elif random.random() < 0.2:
+                    e.target_x = e.mem_food_x + random.uniform(-5, 5)
+                    e.target_y = e.mem_food_y + random.uniform(-5, 5)
 
         if e.state != prev:
             e._refresh_activity(era_idx)
@@ -506,16 +561,15 @@ class Simulation:
         if e.stage == 'elder': move_d *= 0.45
         if e.state == S_REST:  move_d *= 0.05
 
-        if e.state in (S_HUNT, S_DRINK, S_GATHER, S_FOLLOW, S_CHOP, S_BUILD):
+        if e.state in (S_HUNT, S_DRINK, S_GATHER, S_FOLLOW, S_CHOP, S_BUILD, S_SHELTER):
             dx = e.target_x - e.x
             dy = e.target_y - e.y
             dist = math.sqrt(dx*dx + dy*dy) + 0.001
             if dist < 1.0:
-                # S_CHOP and S_BUILD: stay in state, _satisfy_needs handles completion
-                if e.state not in (S_CHOP, S_BUILD):
+                # CHOP/BUILD/SHELTER: stay in state, _satisfy_needs handles completion
+                if e.state not in (S_CHOP, S_BUILD, S_SHELTER):
                     e.state    = S_WANDER
                     e.state_cd = 0
-                # else: stop moving, keep chopping/building in place
                 e.vx = 0.0
                 e.vy = 0.0
             else:
@@ -565,6 +619,21 @@ class Simulation:
 
     # ── terraforming helpers ─────────────────────────────────────────────
 
+    def _find_shelter_target(self, e):
+        """Find nearest forest or highland tile within 12 tiles (natural shelter)."""
+        ex, ey = int(e.x), int(e.y)
+        best, best_d = None, float('inf')
+        for dx in range(-12, 13):
+            for dy in range(-12, 13):
+                x, y = ex + dx, ey + dy
+                if (0 <= x < WORLD_W and 0 <= y < WORLD_H
+                        and self.tiles[x][y] in (T_FOREST, T_HIGHLAND)):
+                    d = dx*dx + dy*dy
+                    if d < best_d:
+                        best_d = d
+                        best   = (x + 0.5, y + 0.5)
+        return best
+
     def _find_chop_target(self, e):
         """Nearest accessible forest tile within 16 tiles."""
         ex, ey = int(e.x), int(e.y)
@@ -599,8 +668,11 @@ class Simulation:
         return e.x + random.uniform(-3, 3), e.y + random.uniform(-3, 3)
 
     def _try_build(self, e):
-        """Deposit carried wood; found or upgrade settlement when threshold met."""
+        """Deposit carried wood; found or upgrade settlement when threshold met (era ≥ 1)."""
         era_idx   = self._era_idx
+        if era_idx == 0:
+            e.inv_wood = 0
+            return
         # Snap to 4×4 grid so nearby clan members pool wood at the same site
         bx = (int(e.x) // 4) * 4
         by = (int(e.y) // 4) * 4
@@ -853,6 +925,13 @@ _REST_DESC = [
     ["Se repose","Fait une sieste","Médite","Écoute de la musique tranquille"],
     ["En mode veille","Régénère ses capacités","Medite en stase","Recharge ses systèmes"],
     ["En hibernation cognitive","Syncronise ses souvenirs","Se recharge","Rêve de l'infini"],
+]
+
+_SHELTER_DESC = [
+    "Se réfugie dans la forêt", "Cherche une grotte", "S'abrite sous les arbres",
+    "Trouve un rocher protecteur", "Dort sous le couvert des feuilles",
+    "Se blottit dans les broussailles", "Cherche un abri naturel",
+    "Trouve refuge dans la roche", "S'allonge dans la forêt dense",
 ]
 
 _CHOP_DESC = [

@@ -3,7 +3,7 @@ import math
 from config import (SCREEN_W, SCREEN_H, TILE_W, TILE_H, WORLD_W, WORLD_H,
                     TILE_COLORS, TILE_HEIGHTS, TIME_SPEEDS, ERAS)
 from simulation import (S_HUNT, S_DRINK, S_GATHER, S_FLEE, S_WANDER,
-                        S_CHOP, S_BUILD, CLAN_COLORS)
+                        S_CHOP, S_BUILD, S_SHELTER, CLAN_COLORS)
 
 # ── Cached surfaces (allocated once, not every frame) ────────────────────────
 _BAR_SURF  = None
@@ -334,6 +334,11 @@ def _draw_character(surface, sx, sy, entity, era_idx, tick, zoom, selected=False
                              (ix - icon_r//2, iy - icon_r, icon_r, icon_r))
             pygame.draw.line(surface, (150,120,70), (ix, iy), (ix, iy + icon_r),
                              max(1, icon_r//2))
+        elif entity.state == S_SHELTER:
+            # Green tent / leaf shape
+            pygame.draw.polygon(surface, (45, 160, 55),
+                [(ix, iy - icon_r), (ix + icon_r, iy + icon_r//2),
+                 (ix - icon_r, iy + icon_r//2)])
 
 
 def _draw_nametag(surface, sx, sy, entity, era_idx, zoom, fonts):
@@ -412,7 +417,7 @@ def _draw_info_panel(surface, entity, era_idx, year, fonts):
     surface.blit(age_s, (px+12, py+26))
 
     # Activity / state
-    state_icons = {0:"✦", 1:"⚔", 2:"💧", 3:"🌿", 4:"💤", 5:"👣", 7:"🪓", 8:"🏗"}
+    state_icons = {0:"✦", 1:"⚔", 2:"💧", 3:"🌿", 4:"💤", 5:"👣", 7:"🪓", 8:"🏗", 9:"🌲"}
     icon = state_icons.get(entity.state, "•")
     act_text = f"{icon}  {entity.activity_desc}" if entity.activity_desc else f"{icon}  Erre..."
     act_s = fonts['sm'].render(act_text[:38], True, (220, 210, 170))
