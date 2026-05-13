@@ -451,7 +451,7 @@ def render(surface, sim, tiles, camera, fonts, tick, selected_entity=None):
         _draw_nametag(surface, sx, sy, selected_entity, era_idx, zoom, fonts)
 
     # ── UI ──
-    _draw_ui(surface, sim, era_idx, era, fonts)
+    _draw_ui(surface, sim, era_idx, era, fonts, camera.zoom)
 
     # ── info panel ──
     if selected_entity is not None:
@@ -460,7 +460,7 @@ def render(surface, sim, tiles, camera, fonts, tick, selected_entity=None):
 
 # ───────────────────────────── HUD ───────────────────────────────────────────
 
-def _draw_ui(surface, sim, era_idx, era, fonts):
+def _draw_ui(surface, sim, era_idx, era, fonts, zoom=1.0):
     # top bar
     bar = pygame.Surface((SCREEN_W, 52), pygame.SRCALPHA)
     bar.fill((0, 0, 0, 155))
@@ -524,5 +524,5 @@ def _draw_ui(surface, sim, era_idx, era, fonts):
         y_ev += 20
 
     # zoom indicator (bottom right above hint)
-    zoom_s = fonts['sm'].render(f"zoom  {camera.zoom:.1f}×", True, (90,88,82))
+    zoom_s = fonts['sm'].render(f"zoom  {zoom:.1f}×", True, (90,88,82))
     surface.blit(zoom_s, (SCREEN_W - zoom_s.get_width()-18, SCREEN_H-46))

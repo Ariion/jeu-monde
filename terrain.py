@@ -1,8 +1,7 @@
 import random
 import math
-from config import (WORLD_W, WORLD_H,
-                    T_DEEP_WATER, T_WATER, T_SAND, T_GRASS,
-                    T_FOREST, T_HIGHLAND, T_MOUNTAIN, T_SNOW)
+from config import WORLD_W, WORLD_H, T_DEEP_WATER, T_WATER, T_SAND, T_GRASS, \
+                   T_FOREST, T_HIGHLAND, T_MOUNTAIN, T_SNOW
 
 
 def _smooth(t):
@@ -18,8 +17,8 @@ def _sample(grid, gw, gh, fx, fy):
     y0 = int(fy) % gh
     x1 = (x0 + 1) % gw
     y1 = (y0 + 1) % gh
-    u = _smooth(fx - int(fx))
-    v = _smooth(fy - int(fy))
+    u  = _smooth(fx - int(fx))
+    v  = _smooth(fy - int(fy))
     return _lerp(
         _lerp(grid[x0][y0], grid[x1][y0], u),
         _lerp(grid[x0][y1], grid[x1][y1], u),
@@ -27,62 +26,92 @@ def _sample(grid, gw, gh, fx, fy):
     )
 
 
-def _fbm(width, height, rng, octaves=((4, 0.50), (8, 0.25), (16, 0.125), (32, 0.0625))):
-    result = [[0.0] * height for _ in range(width)]
-    for scale, amp in octaves:
-        gw = width  // scale + 2
-        gh = height // scale + 2
-        grid = [[rng.random() for _ in range(gh)] for _ in range(gw)]
-        for x in range(width):
-            for y in range(height):
-                result[x][y] += _sample(grid, gw, gh, x / scale, y / scale) * amp
-    return result
+# ── Phase 1 : build random grid objects (very fast) ──────────────────────
 
-
-def _normalize(m, w, h):
-    flat = [m[x][y] for x in range(w) for y in range(h)]
-    lo, hi = min(flat), max(flat)
-    span = hi - lo or 1.0
-    for x in range(w):
-        for y in range(h):
-            m[x][y] = (m[x][y] - lo) / span
-
-
-def generate_terrain(seed=42):
+def build_noise_grids(seed=42):
+    """Return pre-built grid objects for height and moisture — no heavy loops."""
     rng_h = random.Random(seed)
     rng_m = random.Random(seed + 0xBEEF)
 
-    height_map   = _fbm(WORLD_W, WORLD_H, rng_h)
-    moisture_map = _fbm(WORLD_W, WORLD_H, rng_m)
+    # (scale, amplitude, grid_data)
+    octaves = [(4, 0.50), (8, 0.25), (16, 0.125), (32, 0.0625)]
 
-    _normalize(height_map,   WORLD_W, WORLD_H)
-    _normalize(moisture_map, WORLD_W, WORLD_H)
+    def make(rng):
+        result = []
+        for scale, amp in octaves:
+            gw = WORLD_W  // scale + 2
+            gh = WORLD_H  // scale + 2
+            grid = [[rng.random() for _ in range(gh)] for _ in range(gw)]
+            result.append((scale, amp, grid, gw, gh))
+        return result
 
-    # Island mask: fade height toward edges so the world is surrounded by water
+    return make(rng_h), make(rng_m)
+
+
+# ── Phase 2 : compute one row at a time (yielded from main.py) ────────────
+
+def compute_row(x, h_grids, m_grids):
+    """Sample noise for one column x → returns (h_row, m_row) lists."""
+    h_row = [0.0] * WORLD_H
+    m_row = [0.0] * WORLD_H
+    for y in range(WORLD_H):
+        for scale, amp, grid, gw, gh in h_grids:
+            h_row[y] += _sample(grid, gw, gh, x / scale, y / scale) * amp
+        for scale, amp, grid, gw, gh in m_grids:
+            m_row[y] += _sample(grid, gw, gh, x / scale, y / scale) * amp
+    return h_row, m_row
+
+
+# ── Phase 3 : normalise, island-mask, classify ────────────────────────────
+
+def finalize_terrain(height_map, moisture_map):
+    """From raw float maps → tile-type 2D array."""
+    def normalize(m):
+        flat = [m[x][y] for x in range(WORLD_W) for y in range(WORLD_H)]
+        lo, hi = min(flat), max(flat)
+        span = hi - lo or 1.0
+        for x in range(WORLD_W):
+            for y in range(WORLD_H):
+                m[x][y] = (m[x][y] - lo) / span
+
+    normalize(height_map)
+    normalize(moisture_map)
+
     cx, cy = WORLD_W / 2.0, WORLD_H / 2.0
     for x in range(WORLD_W):
         for y in range(WORLD_H):
-            dx = (x - cx) / (WORLD_W / 2.0)
-            dy = (y - cy) / (WORLD_H / 2.0)
-            dist = math.sqrt(dx * dx + dy * dy)
-            mask = max(0.0, 1.0 - dist * 1.25)
-            mask = mask * mask
+            dx   = (x - cx) / (WORLD_W / 2.0)
+            dy_  = (y - cy) / (WORLD_H / 2.0)
+            dist = math.sqrt(dx*dx + dy_*dy_)
+            mask = max(0.0, 1.0 - dist * 1.25) ** 2
             height_map[x][y] = height_map[x][y] * 0.45 + height_map[x][y] * mask * 0.55
 
-    _normalize(height_map, WORLD_W, WORLD_H)
+    normalize(height_map)
 
     tiles = [[T_GRASS] * WORLD_H for _ in range(WORLD_W)]
     for x in range(WORLD_W):
         for y in range(WORLD_H):
             h = height_map[x][y]
             m = moisture_map[x][y]
-            if   h < 0.22:               tiles[x][y] = T_DEEP_WATER
-            elif h < 0.33:               tiles[x][y] = T_WATER
-            elif h < 0.41:               tiles[x][y] = T_SAND
-            elif h < 0.70:
-                tiles[x][y] = T_FOREST if m > 0.52 else T_GRASS
-            elif h < 0.80:               tiles[x][y] = T_HIGHLAND
-            elif h < 0.91:               tiles[x][y] = T_MOUNTAIN
-            else:                        tiles[x][y] = T_SNOW
+            if   h < 0.22:  tiles[x][y] = T_DEEP_WATER
+            elif h < 0.33:  tiles[x][y] = T_WATER
+            elif h < 0.41:  tiles[x][y] = T_SAND
+            elif h < 0.70:  tiles[x][y] = T_FOREST if m > 0.52 else T_GRASS
+            elif h < 0.80:  tiles[x][y] = T_HIGHLAND
+            elif h < 0.91:  tiles[x][y] = T_MOUNTAIN
+            else:           tiles[x][y] = T_SNOW
 
     return tiles, height_map, moisture_map
+
+
+# ── Legacy sync wrapper (desktop / tests) ────────────────────────────────
+
+def generate_terrain(seed=42):
+    h_grids, m_grids = build_noise_grids(seed)
+    height_map   = [[0.0] * WORLD_H for _ in range(WORLD_W)]
+    moisture_map = [[0.0] * WORLD_H for _ in range(WORLD_W)]
+    for x in range(WORLD_W):
+        h_row, m_row = compute_row(x, h_grids, m_grids)
+        height_map[x]   = h_row
+        moisture_map[x] = m_row
+    return finalize_terrain(height_map, moisture_map)

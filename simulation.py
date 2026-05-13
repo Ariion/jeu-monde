@@ -475,14 +475,13 @@ class Simulation:
                                         gy+random.uniform(0.2, 0.8), is_prey=True))
 
     def _find_water_adjacent(self):
+        # Build water tile set first for O(1) lookup
+        water = {(x, y) for x in range(WORLD_W) for y in range(WORLD_H)
+                 if self.tiles[x][y] in (T_WATER, T_DEEP_WATER)}
         result = []
         for x, y in self._walkable:
-            for dx, dy in ((-1,0),(1,0),(0,-1),(0,1)):
-                nx, ny = x+dx, y+dy
-                if 0<=nx<WORLD_W and 0<=ny<WORLD_H:
-                    if self.tiles[nx][ny] in (T_WATER, T_DEEP_WATER):
-                        result.append((x, y))
-                        break
+            if any((x+dx, y+dy) in water for dx, dy in ((-1,0),(1,0),(0,-1),(0,1))):
+                result.append((x, y))
         return result
 
     def _check_era_transition(self):
