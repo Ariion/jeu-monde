@@ -201,6 +201,23 @@ class Simulation:
         # Prehistoric shelter: forests and highland edges (cave analogs)
         self._shelter_tiles = [(x,y) for x in range(WORLD_W) for y in range(WORLD_H)
                                if tiles[x][y] in (T_FOREST, T_HIGHLAND)]
+        # Coarse 8×8 bucket → list of shelter tiles in that cell (fast lookup)
+        self._shelter_grid  = {}
+        for (x, y) in self._shelter_tiles:
+            key = (x // 8, y // 8)
+            if key not in self._shelter_grid:
+                self._shelter_grid[key] = []
+            self._shelter_grid[key].append((x, y))
+
+        # Forest grid for fast chop-target lookup (same 8×8 bucketing)
+        self._forest_grid = {}
+        for x in range(WORLD_W):
+            for y in range(WORLD_H):
+                if tiles[x][y] == T_FOREST:
+                    key = (x // 8, y // 8)
+                    if key not in self._forest_grid:
+                        self._forest_grid[key] = []
+                    self._forest_grid[key].append((x, y))
         # Terraforming: wood remaining per forest tile (4 chops to clear)
         self.tile_resources  = {
             (x, y): 5
@@ -212,6 +229,9 @@ class Simulation:
         # Construction: accumulated wood at build sites {(x,y): wood_count}
         self._build_progress = {}
 
+        self.day_phase   = 0.0   # 0..1 : 0=dawn, 0.5=noon, 1=midnight
+        self.clan_anchors = {}   # filled by _spawn_initial
+
         if epoch:
             self._site_schedule = _precompute_sites(tiles)
             self.year = _epoch_year()
@@ -219,7 +239,7 @@ class Simulation:
         else:
             self.year = 0.0
             self._spawn_initial()
-            self._spawn_prey(18)
+            self._spawn_prey(24)
 
     # ── public ────────────────────────────────────────────────────────────
 
@@ -249,6 +269,8 @@ class Simulation:
             if self.paused: return
             dy = dt * TIME_SPEEDS[self.speed_idx]
             self.year += dy
+            # Day/night cycle: 1 game year = 1 day regardless of speed
+            self.day_phase = (self.day_phase + dt / 60.0) % 1.0   # 60 s real = 1 day
             self._sim_step(dy)
             self._check_era_transition()
             self._settle_cd = max(0.0, self._settle_cd - dy)
@@ -265,7 +287,11 @@ class Simulation:
         tiles    = self.tiles
         dead     = []
 
-        # Build a coarse spatial grid of entities for child→adult following
+        # Hard cap: keep simulation performant at any speed
+        MAX_POP = 300 + era_idx * 100
+        if len(self.entities) > MAX_POP:
+            del self.entities[MAX_POP:]
+
         parents  = {e.eid: e for e in self.entities}
 
         for e in self.entities:
@@ -362,6 +388,11 @@ class Simulation:
                     self.tiles[gx][gy] = T_GRASS
                     del self.tile_resources[key]
                     self.cleared_tiles.append((gx, gy, 300.0))
+                    # Remove from forest grid
+                    fg_key = (gx // 8, gy // 8)
+                    bucket = self._forest_grid.get(fg_key, [])
+                    if (gx, gy) in bucket:
+                        bucket.remove((gx, gy))
                     if random.random() < 0.08:
                         self._add_event("Des arbres sont abattus pour construire.")
             else:
@@ -482,20 +513,28 @@ class Simulation:
                     e.state_cd = random.uniform(6, 12)
 
             else:
-                # Wander but stay near clan group, favour forest/highland edges
-                e.state    = S_WANDER
-                e.state_cd = random.uniform(3, 8)
-                # Drift toward group centre
-                clan_mates = [c for c in self.entities
-                              if c.clan_id == e.clan_id and c is not e]
-                if clan_mates and random.random() < 0.35:
-                    cx = sum(c.x for c in clan_mates) / len(clan_mates)
-                    cy = sum(c.y for c in clan_mates) / len(clan_mates)
-                    e.target_x = cx + random.uniform(-6, 6)
-                    e.target_y = cy + random.uniform(-6, 6)
-                elif random.random() < 0.25:
-                    e.target_x = e.mem_food_x + random.uniform(-5, 5)
-                    e.target_y = e.mem_food_y + random.uniform(-5, 5)
+                # Night → return to clan camp fire; day → roam near group
+                night = self.day_phase > 0.65 or self.day_phase < 0.1
+                anchor = self.clan_anchors.get(e.clan_id)
+                if night and anchor:
+                    e.state    = S_SHELTER
+                    e.target_x = anchor[0] + random.uniform(-2, 2)
+                    e.target_y = anchor[1] + random.uniform(-2, 2)
+                    e.state_cd = random.uniform(10, 20)
+                else:
+                    e.state    = S_WANDER
+                    e.state_cd = random.uniform(3, 8)
+                    # Drift toward group centre or food
+                    clan_mates = [c for c in self.entities
+                                  if c.clan_id == e.clan_id and c is not e]
+                    if clan_mates and random.random() < 0.35:
+                        cx = sum(c.x for c in clan_mates) / len(clan_mates)
+                        cy = sum(c.y for c in clan_mates) / len(clan_mates)
+                        e.target_x = cx + random.uniform(-6, 6)
+                        e.target_y = cy + random.uniform(-6, 6)
+                    elif random.random() < 0.25:
+                        e.target_x = e.mem_food_x + random.uniform(-5, 5)
+                        e.target_y = e.mem_food_y + random.uniform(-5, 5)
 
         # ── ERA 1+ : premiers outils, construction progressive ───────────────
         else:
@@ -622,14 +661,14 @@ class Simulation:
     def _find_shelter_target(self, e):
         """Find nearest forest or highland tile within 12 tiles (natural shelter)."""
         ex, ey = int(e.x), int(e.y)
+        bx, by = ex // 8, ey // 8
         best, best_d = None, float('inf')
-        for dx in range(-12, 13):
-            for dy in range(-12, 13):
-                x, y = ex + dx, ey + dy
-                if (0 <= x < WORLD_W and 0 <= y < WORLD_H
-                        and self.tiles[x][y] in (T_FOREST, T_HIGHLAND)):
-                    d = dx*dx + dy*dy
-                    if d < best_d:
+        # Check the entity's bucket and its 8 neighbours (covers ~24 tile radius)
+        for dbx in range(-2, 3):
+            for dby in range(-2, 3):
+                for (x, y) in self._shelter_grid.get((bx+dbx, by+dby), ()):
+                    d = (x-ex)**2 + (y-ey)**2
+                    if d < best_d and d <= 144:   # 12² = 144
                         best_d = d
                         best   = (x + 0.5, y + 0.5)
         return best
@@ -637,15 +676,13 @@ class Simulation:
     def _find_chop_target(self, e):
         """Nearest accessible forest tile within 16 tiles."""
         ex, ey = int(e.x), int(e.y)
+        bx, by = ex // 8, ey // 8
         best, best_d = None, float('inf')
-        for dx in range(-16, 17):
-            for dy in range(-16, 17):
-                x, y = ex + dx, ey + dy
-                if (0 <= x < WORLD_W and 0 <= y < WORLD_H
-                        and self.tiles[x][y] == T_FOREST
-                        and (x, y) in self.tile_resources):
-                    d = dx*dx + dy*dy
-                    if d < best_d:
+        for dbx in range(-3, 4):
+            for dby in range(-3, 4):
+                for (x, y) in self._forest_grid.get((bx+dbx, by+dby), ()):
+                    d = (x-ex)**2 + (y-ey)**2
+                    if d < best_d and d <= 256 and (x, y) in self.tile_resources:
                         best_d = d
                         best   = (x + 0.5, y + 0.5)
         return best
@@ -821,7 +858,12 @@ class Simulation:
                     centers.append((gx, gy))
                     break
 
+        # Clan anchor positions for night-time camp fire rendering
+        self.clan_anchors = {}   # {clan_id: (x, y)}
+
         for clan_id, (gcx, gcy) in enumerate(centers):
+            self.clan_anchors[clan_id] = (gcx + 0.5, gcy + 0.5)
+
             # Nearest water and food for this group
             if self._water_adj:
                 wx, wy = min(self._water_adj,
@@ -834,13 +876,27 @@ class Simulation:
             else:
                 fx, fy = gcx, gcy
 
+            # Prefer a forest or highland tile for the anchor (natural shelter)
+            shelter_cands = [
+                (x, y)
+                for x in range(gcx-8, gcx+8)
+                for y in range(gcy-8, gcy+8)
+                if 0<=x<WORLD_W and 0<=y<WORLD_H
+                and self.tiles[x][y] in (T_FOREST, T_HIGHLAND)
+            ]
+            if shelter_cands:
+                sx, sy = min(shelter_cands,
+                             key=lambda p: (p[0]-gcx)**2+(p[1]-gcy)**2)
+                self.clan_anchors[clan_id] = (sx + 0.5, sy + 0.5)
+
             cands = [(x, y)
                      for x in range(gcx-7, gcx+7)
                      for y in range(gcy-7, gcy+7)
                      if 0<=x<WORLD_W and 0<=y<WORLD_H
                      and TILE_WALKABLE.get(self.tiles[x][y], False)]
             random.shuffle(cands)
-            for gx, gy in cands[:4]:
+            # 3 adults per clan — small band to start
+            for gx, gy in cands[:3]:
                 e = Entity(gx+0.5, gy+0.5, 0, clan_id=clan_id)
                 e.mem_water_x, e.mem_water_y = wx+0.5, wy+0.5
                 e.mem_food_x,  e.mem_food_y  = fx+0.5, fy+0.5

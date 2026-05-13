@@ -358,27 +358,52 @@ def _draw_nametag(surface, sx, sy, entity, era_idx, zoom, fonts):
 
 def _draw_prey(surface, entity, cam_x, cam_y, zoom):
     sx, sy = world_to_screen(entity.x, entity.y, cam_x, cam_y, zoom)
-    if sx < -10 or sx > SCREEN_W+10 or sy < -10 or sy > SCREEN_H+10:
+    if sx < -12 or sx > SCREEN_W+12 or sy < -12 or sy > SCREEN_H+12:
         return
-    r = max(2, int(zoom * 3))
+    r = max(3, int(zoom * 4.5))    # larger than before
     fleeing = (entity.state == S_FLEE)
-    body = (195,145,55) if not fleeing else (215,75,35)
-    # Body oval
-    pygame.draw.ellipse(surface, body, (sx-r-r//2, sy-r//2, r*3, r))
+    body    = (190, 145, 62) if not fleeing else (215, 80, 40)
+    shadow  = _dk(body, 0.55)
+
+    # Shadow
+    pygame.draw.ellipse(surface, (0,0,0),
+                        (sx - r, sy + r//2, r*2, max(1, r//3)))
+
+    if zoom < 0.5:
+        pygame.draw.circle(surface, body, (sx, sy), max(2, r-1))
+        return
+
+    # Animated legs
+    phase = entity.eid * 1.5 + (entity.x + entity.y) * 0.3
+    move_speed = 1.0 if not fleeing else 2.8
+    leg_sw = int(math.sin(phase * move_speed) * r * 0.7)
+    lw = max(1, r // 3)
+    if zoom >= 0.8:
+        for ox in (-r//3, r//3):
+            pygame.draw.line(surface, shadow,
+                (sx+ox, sy+r//2), (sx+ox+leg_sw, sy+r+r//2), lw)
+            pygame.draw.line(surface, shadow,
+                (sx+ox, sy+r//2), (sx+ox-leg_sw, sy+r+r//2), lw)
+
+    # Body (slightly elongated)
+    pygame.draw.ellipse(surface, body, (sx-r, sy-r//2, r*2, int(r*1.2)))
+
     # Head
-    pygame.draw.circle(surface, _dk(body, 1.1), (sx-r, sy-r//2), max(1, r-1))
-    if zoom >= 1.2:
-        # Ears (small triangles on head)
-        ear = _dk(body, 1.2)
+    hx = sx - r + r//3
+    pygame.draw.circle(surface, _dk(body, 1.12), (hx, sy - r//4), max(2, int(r*0.7)))
+
+    if zoom >= 1.0:
+        # Ears
+        ear = _dk(body, 1.3)
         pygame.draw.polygon(surface, ear,
-            [(sx-r-r//2, sy-r//2-1), (sx-r-r//4, sy-r-1), (sx-r, sy-r//2-1)])
-        # Legs (4 lines)
-        lw = max(1, r//3)
-        phase = entity.eid * 1.5
-        for ox in (-r//2, r//2):
-            swing = int(math.sin(phase) * r * 0.5)
-            pygame.draw.line(surface, _dk(body, 0.7),
-                (sx+ox, sy+r//2), (sx+ox+swing, sy+r+r//2), lw)
+            [(hx-r//3, sy-r//4-1), (hx-r//5, sy-r-2), (hx, sy-r//4-1)])
+        # Antlers for bucks (eid % 3 == 0)
+        if entity.eid % 3 == 0 and zoom >= 1.4:
+            ac = _dk(body, 0.7)
+            pygame.draw.line(surface, ac, (hx, sy-r//4-r//2),
+                             (hx - r//2, sy - r - r//2), max(1, lw-1))
+            pygame.draw.line(surface, ac, (hx - r//4, sy-r-r//4),
+                             (hx - r//4 - r//3, sy - r - r), max(1, lw-1))
 
 
 # ───────────────────────────── info panel ────────────────────────────────────
@@ -455,13 +480,67 @@ def _bar(surface, x, y, w, label, value, color, fonts):
     surface.blit(pct, (bx + bw + 4, y))
 
 
+# ───────────────────────────── era-0 campfires ───────────────────────────────
+
+def _draw_clan_campfires(surface, sim, cam_x, cam_y, zoom, tick, is_night):
+    """Draw a small campfire at each clan's anchor (home base).
+    Fires are always visible at night; a soft glow during the day."""
+    for clan_id, (wx, wy) in sim.clan_anchors.items():
+        sx, sy = world_to_screen(wx, wy, cam_x, cam_y, zoom)
+        if sx < -20 or sx > SCREEN_W + 20 or sy < -20 or sy > SCREEN_H + 20:
+            continue
+
+        z = zoom
+        flicker = math.sin(tick * 9.5 + clan_id * 1.7)
+        base_r  = max(2, int(4 * z))
+        # Glow (bigger at night)
+        glow_r = base_r + int(base_r * (1.5 if is_night else 0.5))
+        if is_night and zoom >= 0.4:
+            glow_surf = pygame.Surface((glow_r*4, glow_r*4), pygame.SRCALPHA)
+            pygame.draw.circle(glow_surf, (255, 160, 40, 55),
+                               (glow_r*2, glow_r*2), glow_r*2)
+            surface.blit(glow_surf, (sx - glow_r*2, sy - glow_r*2))
+
+        # Embers
+        pygame.draw.circle(surface, (70, 40, 10), (sx, sy + base_r), max(1, base_r-1))
+        # Flame core
+        col_f = (255, max(100, 130 + int(flicker * 20)), 20)
+        pygame.draw.circle(surface, col_f, (sx, sy), base_r)
+        # Bright tip
+        pygame.draw.circle(surface, (255, 230, 120), (sx, sy - base_r//2),
+                           max(1, base_r // 2))
+        # Smoke wisps at high zoom
+        if zoom >= 1.2 and is_night:
+            for i in range(2):
+                wy_s = sy - base_r * 2 - i * int(3*z)
+                wx_s = sx + int(math.sin(tick * 3 + i * 1.2) * z)
+                pygame.draw.circle(surface, (80, 78, 75),
+                                   (wx_s, wy_s), max(1, int(z * (1.5 - i*0.4))))
+
+
 # ───────────────────────────── main render ───────────────────────────────────
 
 def render(surface, sim, tiles, camera, fonts, tick, selected_entity=None):
     era_idx, era = sim.get_era()
-    surface.fill(era[2])
+
+    # ── day / night sky tint ──
+    dp      = sim.day_phase                   # 0..1
+    # brightness: dawn 0.55, noon 1.0, dusk 0.55, midnight 0.18
+    if dp < 0.25:                             # dawn
+        bright = 0.55 + dp / 0.25 * 0.45
+    elif dp < 0.5:                            # day
+        bright = 1.0
+    elif dp < 0.75:                           # dusk
+        bright = 1.0 - (dp - 0.5) / 0.25 * 0.45
+    else:                                     # night
+        bright = max(0.18, 0.55 - (dp - 0.75) / 0.25 * 0.37)
+    sky = era[2]
+    sky_b = (max(0, int(sky[0]*bright)), max(0, int(sky[1]*bright)),
+             max(0, int(sky[2]*bright)))
+    surface.fill(sky_b)
 
     cam_x, cam_y, zoom = camera.x, camera.y, camera.zoom
+    is_night = dp > 0.65 or dp < 0.1
 
     # ── tiles ──
     for diag in range(WORLD_W + WORLD_H - 1):
@@ -482,16 +561,17 @@ def render(surface, sim, tiles, camera, fonts, tick, selected_entity=None):
             if s:
                 _draw_building(surface, gx, gy, s.level, era_idx, cam_x, cam_y, zoom, tick)
 
+    # ── era-0 campfires: drawn at clan anchor spots when it's night ──
+    if era_idx == 0:
+        _draw_clan_campfires(surface, sim, cam_x, cam_y, zoom, tick, is_night)
+
     # ── stumps (recently cleared forest tiles) ──
     if zoom >= 0.5:
         stump_r = max(1, int(2.5 * zoom))
         for (cx, cy, t_rem) in sim.cleared_tiles:
             sx, sy = world_to_screen(cx + 0.5, cy + 0.5, cam_x, cam_y, zoom)
             if -8 < sx < SCREEN_W + 8 and -8 < sy < SCREEN_H + 8:
-                alpha = min(255, int(t_rem / 300.0 * 255))
-                # Stump cross
                 lw = max(1, stump_r // 2)
-                col = (110, 80, 45, alpha)
                 pygame.draw.circle(surface, (110, 80, 45), (sx, sy), stump_r)
                 if zoom >= 0.9:
                     pygame.draw.line(surface, (75, 52, 28),
