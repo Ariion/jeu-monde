@@ -226,7 +226,10 @@ def _draw_ui(surface, sim, era_idx, era, fonts):
     pop_surf = fonts['med'].render(f"Population  {sim.population():,}", True, (160, 220, 160))
     surface.blit(pop_surf, (530, 16))
 
-    if sim.paused:
+    if sim.epoch:
+        spd_str   = "⬤  EN DIRECT"
+        spd_color = (255, 90, 90)
+    elif sim.paused:
         spd_str   = "⏸  PAUSE"
         spd_color = (255, 150, 50)
     else:
@@ -252,10 +255,11 @@ def _draw_ui(surface, sim, era_idx, era, fonts):
     desc_surf = fonts['sm'].render(era[3], True, (155, 155, 185))
     surface.blit(desc_surf, (18, SCREEN_H - 22))
 
-    hint_surf = fonts['sm'].render(
-        "ESPACE pause  ·  ↑ ↓ vitesse  ·  Z Q S D / ← → ↑ ↓ caméra  ·  ÉCHAP quitter",
-        True, (90, 90, 90)
-    )
+    if sim.epoch:
+        hint_text = "Z Q S D / flèches : déplacer la caméra  ·  monde en temps réel"
+    else:
+        hint_text = "ESPACE pause  ·  + - vitesse  ·  Z Q S D / flèches caméra  ·  ÉCHAP quitter"
+    hint_surf = fonts['sm'].render(hint_text, True, (90, 90, 90))
     surface.blit(hint_surf, (SCREEN_W - hint_surf.get_width() - 18, SCREEN_H - 22))
 
     # ── event log (left side) ──

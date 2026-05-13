@@ -75,4 +75,13 @@ ERAS = [
 ]
 
 TIME_SPEEDS = [0, 1, 5, 20, 100, 500, 2000]
-DEFAULT_SPEED_IDX = 2  # 5 years/sec
+DEFAULT_SPEED_IDX = 2  # 5 years/sec  (desktop free-play mode)
+
+# ── Persistent world (epoch mode) ──────────────────────────────────────────
+# The world "started" at this Unix timestamp and has been running ever since.
+# 2026-05-13 00:00:00 UTC
+EPOCH_TIMESTAMP    = 1778630400   # 2026-05-13 00:00:00 UTC
+YEARS_PER_SECOND   = 1.0 / 60.0   # 1 real minute = 1 game year
+#   → 1 real day  ≈ 1 440 game years
+#   → 1 real week ≈ 10 080 game years  (reaches Modern era)
+
