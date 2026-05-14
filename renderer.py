@@ -33,7 +33,7 @@ _SETTLE_LAYOUTS = {
 
 # ───────────────────────────── colour helpers ────────────────────────────────
 
-def _dk(c, f):  return (max(0,int(c[0]*f)), max(0,int(c[1]*f)), max(0,int(c[2]*f)))
+def _dk(c, f):  return (max(0,min(255,int(c[0]*f))), max(0,min(255,int(c[1]*f))), max(0,min(255,int(c[2]*f))))
 def _mix(a, b, t): return (int(a[0]+(b[0]-a[0])*t), int(a[1]+(b[1]-a[1])*t), int(a[2]+(b[2]-a[2])*t))
 
 
