@@ -276,9 +276,11 @@ class Simulation:
             self.year = _epoch_year()
             self._bootstrap_epoch()
         else:
-            self.year = 0.0
+            self.year       = 1100.0   # start at Âge de Pierre — buildings visible immediately
+            self._era_idx   = 1
+            self.speed_idx  = 3        # 20 yrs/s default (user can adjust with +/-)
             self._spawn_initial()
-            self._spawn_prey(24)
+            self._spawn_prey(20)
 
     # ── public ────────────────────────────────────────────────────────────
 
@@ -758,8 +760,8 @@ class Simulation:
         e.inv_wood = 0
 
         # If enough wood accumulated and no settlement too close → found one
-        if self._build_progress.get(key, 0) >= 8:
-            if not any(abs(s.gx - bx) + abs(s.gy - by) < 12 for s in self.settlements):
+        if self._build_progress.get(key, 0) >= 6:
+            if not any(abs(s.gx - bx) + abs(s.gy - by) < 10 for s in self.settlements):
                 s = Settlement(bx + 2, by + 2, self.year, era_idx)
                 self.settlements.append(s)
                 self._add_event(
@@ -799,7 +801,26 @@ class Simulation:
 
     def _update_settlements(self, dy):
         era_idx, _ = self.get_era()
-        if era_idx < 1 or self._settle_cd > 0: return
+        if era_idx < 1: return
+
+        # ── Level updates always run (regardless of cooldown) ──
+        for s in self.settlements:
+            nearby = sum(1 for e in self.entities
+                         if abs(e.x-s.gx) <= 10 and abs(e.y-s.gy) <= 10)
+            s.population = nearby
+            # (min_pop, min_era) — level 1-2 accessible dès era 1
+            level_reqs = [(0,0), (3,1), (8,1), (22,2), (55,3), (130,4)]
+            for lvl in range(len(level_reqs)-1, -1, -1):
+                min_pop, min_era = level_reqs[lvl]
+                if nearby >= min_pop and era_idx >= min_era:
+                    s.level = lvl; break
+            if s.level > s._prev_level:
+                if s._prev_level >= 0:
+                    self._on_settlement_level_up(s)
+                s._prev_level = s.level
+
+        # ── New settlement founding (gated by cooldown) ──
+        if self._settle_cd > 0: return
         density = {}
         for e in self.entities:
             key = (int(e.x), int(e.y))
@@ -816,20 +837,8 @@ class Simulation:
             self.settlements.append(s)
             existing.add((tx, ty))
             self._add_event(random.choice(_SETTLE_MSGS[min(era_idx, len(_SETTLE_MSGS)-1)]))
-            self._settle_cd = 100.0 + era_idx * 30
+            self._settle_cd = 80.0 + era_idx * 20
             break
-        for s in self.settlements:
-            nearby = sum(1 for e in self.entities
-                         if abs(e.x-s.gx) <= 7 and abs(e.y-s.gy) <= 7)
-            s.population = nearby
-            thresholds = [0, 4, 12, 35, 90, 200]
-            for lvl in range(len(thresholds)-1, -1, -1):
-                if nearby >= thresholds[lvl] and era_idx >= lvl:
-                    s.level = lvl; break
-            if s.level > s._prev_level:
-                if s._prev_level >= 0:
-                    self._on_settlement_level_up(s)
-                s._prev_level = s.level
 
     def _on_settlement_level_up(self, s):
         """Auto-clear forest around a growing settlement."""
@@ -960,17 +969,26 @@ class Simulation:
                 self.clan_anchors[clan_id] = (sx + 0.5, sy + 0.5)
 
             cands = [(x, y)
-                     for x in range(gcx-7, gcx+7)
-                     for y in range(gcy-7, gcy+7)
+                     for x in range(gcx-8, gcx+8)
+                     for y in range(gcy-8, gcy+8)
                      if 0<=x<WORLD_W and 0<=y<WORLD_H
                      and TILE_WALKABLE.get(self.tiles[x][y], False)]
             random.shuffle(cands)
-            # 3 adults per clan — small band to start
-            for gx, gy in cands[:3]:
-                e = Entity(gx+0.5, gy+0.5, 0, clan_id=clan_id)
+            # 8 adults per clan — already in Âge de Pierre, active builders
+            for gx, gy in cands[:8]:
+                e = Entity(gx+0.5, gy+0.5, 1, clan_id=clan_id)
                 e.mem_water_x, e.mem_water_y = wx+0.5, wy+0.5
                 e.mem_food_x,  e.mem_food_y  = fx+0.5, fy+0.5
+                e.inv_wood = random.randint(0, 3)   # some wood already gathered
                 self.entities.append(e)
+
+            # Founding settlement at the clan camp — visible huts from the start
+            s = Settlement(gcx, gcy, self.year, 1)
+            s._prev_level = -1
+            self.settlements.append(s)
+
+        # Force an initial level calculation so buildings are visible from frame 1
+        self._update_settlements(0.0)
 
     def _spawn_prey(self, n=1):
         for _ in range(n):
