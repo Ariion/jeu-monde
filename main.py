@@ -8,6 +8,16 @@ from renderer import Camera, render, find_nearest_entity
 
 IS_WEB = sys.platform == "emscripten"
 
+# Try to import moderngl – gracefully fall back to pygame renderer on WASM / missing GL
+USE_GL = False
+if not IS_WEB:
+    try:
+        import moderngl
+        from renderer_gl import GLRenderer
+        USE_GL = True
+    except Exception as _gl_err:
+        print(f"[renderer] GL unavailable ({_gl_err}), using pygame renderer")
+
 
 def make_fonts():
     families = ["segoeui", "arial", "freesans", "dejavusans", ""]
@@ -25,13 +35,10 @@ def make_fonts():
 def _draw_loading(screen, fonts, message, pct):
     """Draw loading screen with progress bar — called between async yields."""
     screen.fill((10, 8, 5))
-    # Title
     title = fonts['big'].render("Jeu Monde", True, (200, 170, 100))
     screen.blit(title, (SCREEN_W//2 - title.get_width()//2, SCREEN_H//2 - 70))
-    # Message
     msg = fonts['med'].render(message, True, (160, 150, 120))
     screen.blit(msg, (SCREEN_W//2 - msg.get_width()//2, SCREEN_H//2 - 20))
-    # Progress bar
     bw, bh = 400, 12
     bx = SCREEN_W//2 - bw//2
     by = SCREEN_H//2 + 20
@@ -40,7 +47,6 @@ def _draw_loading(screen, fonts, message, pct):
     if filled > 0:
         pygame.draw.rect(screen, (200, 160, 60), (bx, by, filled, bh), border_radius=6)
     pygame.draw.rect(screen, (80, 70, 50), (bx, by, bw, bh), 1, border_radius=6)
-    # Percentage
     pct_s = fonts['sm'].render(f"{pct}%", True, (120, 110, 80))
     screen.blit(pct_s, (SCREEN_W//2 - pct_s.get_width()//2, by + bh + 8))
     pygame.display.flip()
@@ -56,7 +62,6 @@ async def generate_world_async(screen, fonts, seed=42):
     height_map   = [[0.0] * WORLD_H for _ in range(WORLD_W)]
     moisture_map = [[0.0] * WORLD_H for _ in range(WORLD_W)]
 
-    # Yield every CHUNK columns so the browser stays responsive (~16ms per chunk in WASM)
     CHUNK = 2
     for x in range(WORLD_W):
         h_row, m_row = compute_row(x, h_grids, m_grids)
@@ -80,22 +85,43 @@ async def generate_world_async(screen, fonts, seed=42):
 
 async def main():
     pygame.init()
-    flags  = pygame.SCALED if IS_WEB else 0
-    screen = pygame.display.set_mode((SCREEN_W, SCREEN_H), flags)
+
+    # ── Phase 1: normal pygame window for async loading ────────────────────────
+    load_flags = pygame.SCALED if IS_WEB else 0
+    screen = pygame.display.set_mode((SCREEN_W, SCREEN_H), load_flags)
     pygame.display.set_caption("Jeu Monde — L'Évolution de l'Humanité")
     clock  = pygame.time.Clock()
     fonts  = make_fonts()
 
-    # ── Async world generation ──
     tiles = await generate_world_async(screen, fonts, seed=42)
 
     _draw_loading(screen, fonts, "Initialisation de la simulation…", 90)
     await asyncio.sleep(0)
 
-    sim    = Simulation(tiles, epoch=IS_WEB)
+    sim = Simulation(tiles, epoch=IS_WEB)
 
-    _draw_loading(screen, fonts, "Prêt !", 100)
+    _draw_loading(screen, fonts, "Construction du rendu 3D…" if USE_GL else "Prêt !", 96)
     await asyncio.sleep(0)
+
+    # ── Phase 2: switch to OpenGL display (desktop only) ──────────────────────
+    gl_renderer = None
+    if USE_GL:
+        pygame.display.quit()
+        pygame.display.init()
+        screen = pygame.display.set_mode(
+            (SCREEN_W, SCREEN_H),
+            pygame.OPENGL | pygame.DOUBLEBUF,
+        )
+        pygame.display.set_caption("Jeu Monde — L'Évolution de l'Humanité")
+        try:
+            ctx = moderngl.create_context()
+            gl_renderer = GLRenderer(ctx, tiles)
+        except Exception as e:
+            print(f"[renderer] GL context failed ({e}), falling back to pygame")
+            gl_renderer = None
+            pygame.display.quit()
+            pygame.display.init()
+            screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
 
     camera = Camera()
     tick   = 0.0
@@ -147,10 +173,17 @@ async def main():
         camera.move(dx, dy, dt)
 
         sim.update(dt)
-        render(screen, sim, tiles, camera, fonts, tick, selected_entity)
+
+        if gl_renderer is not None:
+            gl_renderer.render(sim, camera, tick, fonts, selected_entity)
+        else:
+            render(screen, sim, tiles, camera, fonts, tick, selected_entity)
+
         pygame.display.flip()
         await asyncio.sleep(0)
 
+    if gl_renderer is not None:
+        gl_renderer.release()
     pygame.quit()
     if not IS_WEB:
         sys.exit()
