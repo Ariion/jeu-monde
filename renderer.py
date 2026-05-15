@@ -122,73 +122,456 @@ def _draw_tile(surface, gx, gy, tile_type, cam_x, cam_y, zoom):
         pygame.draw.aalines(surface, _dk(base, 0.82), True, top)
 
 
+
 # ───────────────────────────── building rendering ────────────────────────────
 
+# Per-era color palettes: (wall_left, wall_right, wall_top, roof_front, roof_side, outline, window)
+_ERA_PAL = [
+    # 0 Préhistoire – peau / écorce sombre
+    ((105,72,38),(122,86,48),(88,60,30),(72,48,25),(58,38,18),(48,32,15),(200,158,78)),
+    # 1 Néolithique – torchis ocre
+    ((148,112,72),(168,130,88),(135,102,62),(152,96,48),(118,78,38),(98,72,42),(252,198,115)),
+    # 2 Antiquité – brique crue
+    ((188,155,108),(208,175,128),(198,165,118),(178,138,82),(155,115,65),(142,112,72),(255,218,148)),
+    # 3 Classique – marbre ivoire
+    ((175,168,152),(198,190,175),(208,202,188),(158,98,48),(130,80,35),(125,118,108),(195,215,252)),
+    # 4 Moyen Âge – pierre grise
+    ((102,98,90),(118,112,104),(108,104,96),(80,66,50),(62,52,40),(58,55,50),(172,158,115)),
+    # 5 Renaissance – pierre chaude + tuile
+    ((165,148,118),(185,168,138),(175,158,128),(178,78,48),(148,62,35),(125,112,85),(205,218,252)),
+    # 6 Industrie – brique rouge + acier
+    ((142,68,44),(162,82,54),(128,60,38),(48,46,42),(38,36,32),(98,48,30),(172,152,88)),
+    # 7 Moderne – béton + verre
+    ((128,132,140),(148,152,158),(142,146,152),(105,108,112),(88,90,95),(82,84,88),(148,192,232)),
+    # 8 Futur proche – blanc nacré
+    ((182,188,202),(202,208,222),(215,220,230),(72,168,212),(48,138,178),(142,150,165),(88,188,252)),
+    # 9 Futur lointain – cristal lumineux
+    ((35,45,88),(50,65,118),(65,95,155),(15,170,248),(12,130,195),(68,108,192),(168,212,252)),
+]
+
+
 def _draw_building(surface, gx, gy, level, era_idx, cam_x, cam_y, zoom, tick):
-    sx, sy = world_to_screen(gx+0.5, gy+0.5, cam_x, cam_y, zoom)
-    sy -= int(TILE_HEIGHTS.get(3, 6) * zoom) + 2
-    z = zoom
+    cx, cy = world_to_screen(gx + 0.5, gy + 0.5, cam_x, cam_y, zoom)
+    cy -= int(TILE_HEIGHTS.get(3, 6) * zoom) + 2
 
-    if level == 0:   # campfire
-        flicker = int(math.sin(tick*9 + gx)*2)
-        r = max(2, int(3*z))
-        pygame.draw.circle(surface, (70,40,10),   (sx, sy+r), max(1,r-1))
-        pygame.draw.circle(surface, (255, 140+flicker*8, 20), (sx, sy), r)
-        pygame.draw.circle(surface, (255, 220, 100), (sx, sy), max(1,r-1))
+    if cx < -140 or cx > SCREEN_W + 140: return
+    if cy > SCREEN_H + 100: return
 
-    elif level == 1:  # hut
-        w = max(4, int(8*z)); h = max(3, int(6*z))
-        pygame.draw.rect(surface, (155,108,62), (sx-w//2, sy, w, h))
-        pygame.draw.polygon(surface, (190,75,50),
-            [(sx-w//2-1, sy), (sx+w//2+1, sy), (sx, sy-int(8*z))])
+    z   = zoom
+    htw = TILE_W * z / 2   # half-tile width  ≈ 32z px
+    hth = TILE_H * z / 2   # half-tile height ≈ 16z px
 
-    elif level == 2:  # village
-        w = max(6, int(12*z)); h = max(4, int(9*z))
-        pygame.draw.rect(surface, (140,132,112), (sx-w//2, sy-2, w, h))
-        pygame.draw.polygon(surface, (165,72,52),
-            [(sx-w//2-1, sy-2), (sx+w//2+1, sy-2), (sx, sy-2-int(10*z))])
+    ei  = min(era_idx, 9)
+    pal = _ERA_PAL[ei]
+    wl, wr, wt, rf, rs, ol, wn = pal
 
-    elif level == 3:  # town
-        w = max(8, int(14*z)); h = max(6, int(12*z))
-        pygame.draw.rect(surface, (120,114,104), (sx-w//2, sy-4, w, h))
-        tw = max(4, int(5*z)); th2 = max(5, int(14*z))
-        pygame.draw.rect(surface, (100,95,88), (sx-tw//2, sy-4-th2, tw, th2))
-        pygame.draw.polygon(surface, (80,60,40),
-            [(sx-tw//2, sy-4-th2), (sx+tw//2, sy-4-th2), (sx, sy-4-th2-int(5*z))])
+    def ip(p):          return (int(p[0]), int(p[1]))
+    def up(p, h):       return (p[0], p[1] - h)
+    def lrp(a, b, t):   return (a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t)
+    def poly(col, pts):
+        if len(pts) < 3: return
+        pygame.draw.polygon(surface, col, [ip(p) for p in pts])
+    def lpoly(col, pts, lw=1):
+        if len(pts) < 3: return
+        pygame.draw.polygon(surface, col, [ip(p) for p in pts], max(1,lw))
 
-    elif level == 4:  # city
-        w = max(10, int(14*z)); h = max(12, int(22*z))
-        pygame.draw.rect(surface, (108,118,142), (sx-w//2, sy-h, w, h))
-        pygame.draw.rect(surface, (125,138,162), (sx-w//3, sy-h-int(7*z), w//2, int(7*z)))
-        if era_idx >= 6:
-            cw = max(2, int(3*z))
-            pygame.draw.rect(surface, (75,70,68), (sx+w//2, sy-int(28*z), cw, int(14*z)))
-            smoke_y = int(sy - 28*z - int(math.sin(tick*2+gx)*2))
-            pygame.draw.circle(surface, (90,88,85), (sx+w//2+cw//2, smoke_y), max(2,int(3*z)))
-        step = max(1, int(5*z)); win = max(1, int(2*z))
-        for row in range(3):
-            for col in range(2):
-                wx_ = sx - w//2 + int(3*z) + col*int(6*z)
-                wy_ = sy - h + int(3*z) + row*step
-                pygame.draw.rect(surface, (255,240,165), (wx_, wy_, win, win))
+    # Iso-tile base diamond (south tip = front of building)
+    pf = (cx,        cy + hth)  # south / front
+    pl = (cx - htw,  cy)        # west  / left
+    pr = (cx + htw,  cy)        # east  / right
+    pb = (cx,        cy - hth)  # north / back (hidden)
 
-    elif level == 5:  # megacity / future
-        w = max(10, int(12*z)); h = max(18, int(36*z))
-        if era_idx >= 9:
-            glow_col = (50+int(math.sin(tick*1.5)*15), 90, 220)
-            pygame.draw.rect(surface, glow_col, (sx-w//2, sy-h, w, h))
-            top_r = max(3, int(5*z))
-            pygame.draw.circle(surface, (160,200,255), (sx, sy-h), top_r)
-            pygame.draw.circle(surface, (255,255,255), (sx, sy-h), max(1,top_r-2))
+    def box(h, cl, cr, ct, outline=None):
+        """3-face isometric box of height h pixels."""
+        lf = [pl, pf, up(pf, h), up(pl, h)]
+        rf = [pr, pf, up(pf, h), up(pr, h)]
+        tf = [up(pl, h), up(pf, h), up(pr, h), up(pb, h)]
+        poly(cl, lf); poly(cr, rf); poly(ct, tf)
+        if outline:
+            lw = max(1, int(z * 0.85))
+            lpoly(outline, lf, lw); lpoly(outline, rf, lw); lpoly(outline, tf, lw)
+
+    def hip_roof(wh, rh, col_f, col_s, col_o=None):
+        """4-sided hip (pyramid) roof above wall-height wh, roof-height rh."""
+        pk = (cx, cy - wh - rh)
+        poly(col_f, [up(pl,wh), up(pf,wh), pk])
+        poly(col_s, [up(pr,wh), up(pf,wh), pk])
+        if col_o and z >= 0.55:
+            lw = max(1, int(z))
+            pygame.draw.line(surface, col_o, ip(up(pf,wh)), ip(pk), lw)
+
+    def gabled_roof(wh, rh, col_f, col_s, col_o=None):
+        """Ridge-gabled roof: ridge runs front→back, visible slopes left+right."""
+        pk_front = (cx, cy - wh - rh)
+        pk_back  = (cx, cy - wh - rh + int(hth * 0.5))
+        poly(col_f, [up(pl,wh), up(pf,wh), pk_front, pk_back])
+        poly(col_s, [up(pr,wh), up(pf,wh), pk_front])
+        if col_o and z >= 0.5:
+            lw = max(1, int(z))
+            pygame.draw.line(surface, col_o, ip(pk_front), ip(pk_back), lw)
+            pygame.draw.line(surface, col_o, ip(up(pf,wh)), ip(pk_front), lw)
+
+    def win_face(bl, br, tl, tr, fx, fy, fw, fh, col):
+        """Draw a window quad on a parallelogram face defined by 4 corners."""
+        if z < 0.55: return
+        def pt(x, y): return lrp(lrp(bl,br,x), lrp(tl,tr,x), y)
+        pts = [pt(fx,fy), pt(fx+fw,fy), pt(fx+fw,fy+fh), pt(fx,fy+fh)]
+        poly(col, pts)
+        if z >= 1.0:  # bright glint at high zoom
+            glint = (min(255,col[0]+60), min(255,col[1]+60), min(255,col[2]+60))
+            pygame.draw.line(surface, glint, ip(pts[0]), ip(pts[1]), max(1,int(z*0.5)))
+
+    def battlement(wh, bh, col):
+        """Crenellated parapet on top of wall-height wh."""
+        if z < 0.4: return
+        mw = 0.12; gap = 0.22
+        for t in [0.05, 0.05+gap, 0.05+gap*2, 0.05+gap*3]:
+            # Left face merlon
+            a = lrp(up(pl,wh), up(pf,wh), t)
+            b = lrp(up(pl,wh), up(pf,wh), t+mw)
+            poly(col, [a, b, up(b,bh), up(a,bh)])
+        for t in [0.05, 0.05+gap, 0.05+gap*2, 0.05+gap*3]:
+            # Right face merlon
+            a = lrp(up(pr,wh), up(pf,wh), t)
+            b = lrp(up(pr,wh), up(pf,wh), t+mw)
+            poly(col, [a, b, up(b,bh), up(a,bh)])
+
+    # ── Level 0: campfire ──────────────────────────────────────────────────
+    if level == 0:
+        flicker = math.sin(tick * 9.5 + gx * 1.3)
+        r = max(2, int(3 * z))
+        pygame.draw.circle(surface, (60, 36, 10),   ip((cx, cy + r)),     max(1, r-1))
+        col_f = (255, max(100, int(132 + flicker*22)), 15)
+        pygame.draw.circle(surface, col_f,           ip((cx, cy)),          r)
+        pygame.draw.circle(surface, (255, 228, 105), ip((cx, cy - r//2)),   max(1, r//2))
+        return
+
+    # ── Level 1: hutte (era-aware) ─────────────────────────────────────────
+    if level == 1:
+        wh = max(5, int(9 * z))
+        rh = max(4, int(10 * z))
+        if ei <= 1:
+            # Peau / torchis rond → conical roof
+            box(wh, wl, wr, wt, ol)
+            hip_roof(wh, rh, rf, rs, ol)
+            # Entrée (ouverture sombre)
+            if z >= 0.7:
+                dw = max(1, int(htw * 0.22))
+                dh = max(2, int(wh * 0.55))
+                door_bl = lrp(pl, pf, 0.45)
+                door_br = lrp(pl, pf, 0.55)
+                poly(_dk(ol, 0.5), [door_bl, door_br,
+                                    (door_br[0], door_br[1]-dh),
+                                    (door_bl[0], door_bl[1]-dh)])
+        elif ei <= 3:
+            # Maison antique en torchis / briques
+            box(wh, wl, wr, wt, ol)
+            gabled_roof(wh, rh, rf, rs, ol)
+            if z >= 0.65:
+                win_face(pl, pf, up(pl,wh), up(pf,wh), 0.2, 0.3, 0.2, 0.35, wn)
+                win_face(pr, pf, up(pr,wh), up(pf,wh), 0.2, 0.3, 0.2, 0.35, wn)
+        elif ei <= 6:
+            # Maison en pierre / brique
+            box(wh, wl, wr, wt, ol)
+            gabled_roof(wh, rh, rf, rs, _dk(rf, 0.7))
+            if z >= 0.6:
+                win_face(pl, pf, up(pl,wh), up(pf,wh), 0.18, 0.25, 0.22, 0.38, wn)
+                win_face(pr, pf, up(pr,wh), up(pf,wh), 0.62, 0.25, 0.22, 0.38, wn)
         else:
-            pygame.draw.rect(surface, (95,110,142), (sx-w//2, sy-h, w, h))
-            pygame.draw.rect(surface, (112,128,162), (sx-w//3, sy-h-int(8*z), w//2, int(8*z)))
-            step = max(1, int(5*z)); win = max(1, int(2*z))
-            for row in range(5):
-                for col in range(2):
-                    wx_ = sx - w//2 + int(2*z) + col*int(6*z)
-                    wy_ = sy - h + int(3*z) + row*step
-                    pygame.draw.rect(surface, (255,240,165), (wx_, wy_, win, win))
+            # Futur: module préfab
+            box(wh, wl, wr, wt, ol)
+            # Toit plat avec bande lumineuse
+            poly(rf, [up(pl,wh), up(pf,wh), up(pr,wh), up(pb,wh)])
+            if z >= 0.7:
+                pygame.draw.line(surface, wn,
+                    ip(lrp(up(pl,wh), up(pf,wh), 0.1)),
+                    ip(lrp(up(pl,wh), up(pf,wh), 0.9)), max(1,int(z)))
+        return
+
+    # ── Level 2: bâtiment de village ──────────────────────────────────────
+    if level == 2:
+        wh = max(7, int(13 * z))
+        rh = max(5, int(11 * z))
+        box(wh, wl, wr, wt, ol)
+        if ei <= 2:
+            # Toit en chaume long
+            gabled_roof(wh, rh, rf, rs, ol)
+        elif ei <= 5:
+            # Toit à 4 pans en tuiles
+            hip_roof(wh, rh, rf, rs, _dk(ol, 0.8))
+            # Petite cheminée
+            if z >= 0.55:
+                ch_bl = lrp(up(pl,wh), up(pf,wh), 0.65)
+                ch_h  = max(2, int(5*z)); ch_w = max(1, int(3*z))
+                pygame.draw.rect(surface, wl,
+                    (int(ch_bl[0])-ch_w//2, int(ch_bl[1])-ch_h, ch_w, ch_h))
+        elif ei <= 7:
+            # Toit plat industriel / moderne
+            poly(rf, [up(pl,wh), up(pf,wh), up(pr,wh), up(pb,wh)])
+            lpoly(_dk(rf,0.7), [up(pl,wh), up(pf,wh), up(pr,wh), up(pb,wh)], max(1,int(z)))
+        else:
+            # Futur: dôme
+            dome_r = max(4, int(htw * 0.8))
+            pygame.draw.circle(surface, rf, ip((cx, cy - wh)), dome_r)
+            pygame.draw.circle(surface, (min(255,rf[0]+40),min(255,rf[1]+40),min(255,rf[2]+60)),
+                               ip((cx, cy - wh - dome_r//3)), max(1, dome_r//2))
+        # Fenêtres
+        if z >= 0.6:
+            win_face(pl, pf, up(pl,wh), up(pf,wh), 0.15, 0.25, 0.18, 0.32, wn)
+            win_face(pl, pf, up(pl,wh), up(pf,wh), 0.62, 0.25, 0.18, 0.32, wn)
+            win_face(pr, pf, up(pr,wh), up(pf,wh), 0.15, 0.25, 0.18, 0.32, wn)
+            win_face(pr, pf, up(pr,wh), up(pf,wh), 0.62, 0.25, 0.18, 0.32, wn)
+        # Porte
+        if z >= 0.75:
+            poly(_dk(ol, 0.55), [
+                lrp(pl, pf, 0.42), lrp(pl, pf, 0.58),
+                lrp(lrp(pl,pf,0.58), lrp(up(pl,wh),up(pf,wh),0.58), 0.48),
+                lrp(lrp(pl,pf,0.42), lrp(up(pl,wh),up(pf,wh),0.42), 0.48),
+            ])
+        return
+
+    # ── Level 3: bâtiment de bourg / tour ─────────────────────────────────
+    if level == 3:
+        wh = max(10, int(18 * z))
+        rh = max(5, int(9  * z))
+        box(wh, wl, wr, wt, ol)
+
+        if ei <= 1:
+            gabled_roof(wh, rh, rf, rs, ol)
+        elif ei <= 3:
+            # Temple / colonnes
+            hip_roof(wh, rh, rf, rs, _dk(ol,0.8))
+            if z >= 0.7:
+                for t in [0.15, 0.5, 0.85]:
+                    col_pt = lrp(pl, pf, t)
+                    pygame.draw.line(surface, _dk(wl,1.2),
+                        ip(col_pt), ip((col_pt[0], col_pt[1]-wh)), max(1, int(z*0.7)))
+        elif ei == 4:
+            # Tour médiévale avec créneaux
+            battlement(wh, max(2, int(4*z)), _dk(wl,1.1))
+        elif ei == 5:
+            # Façade Renaissance + fronton
+            hip_roof(wh, rh, rf, rs, _dk(ol,0.8))
+            if z >= 0.65:
+                arch_y = cy - int(wh * 0.3)
+                pygame.draw.arc(surface, wn,
+                    (int(cx-htw*0.25), arch_y-int(htw*0.25),
+                     int(htw*0.5), int(htw*0.5)), 0, math.pi, max(1,int(z)))
+        elif ei <= 7:
+            poly(rf, [up(pl,wh), up(pf,wh), up(pr,wh), up(pb,wh)])
+        else:
+            # Tour futuriste
+            poly(rf, [up(pl,wh), up(pf,wh), up(pr,wh), up(pb,wh)])
+            spire_h = max(4, int(12*z))
+            poly(wn, [up(pl,wh), up(pf,wh), ip((cx, cy-wh-spire_h))])
+            poly(_dk(wn,0.7), [up(pr,wh), up(pf,wh), ip((cx, cy-wh-spire_h))])
+
+        # Fenêtres (2 rangées)
+        if z >= 0.5:
+            for row_y in [0.25, 0.65]:
+                for tx in [0.18, 0.5, 0.78]:
+                    wh_row = int(wh * row_y)
+                    win_face(pl, pf, up(pl, wh_row + int(4*z)), up(pf, wh_row + int(4*z)),
+                             tx, 0.05, 0.16, 0.90, wn)
+                    win_face(pr, pf, up(pr, wh_row + int(4*z)), up(pf, wh_row + int(4*z)),
+                             tx, 0.05, 0.16, 0.90, wn)
+
+        # Tour secondaire au centre-arrière
+        if z >= 0.45:
+            tw2 = int(htw * 0.38); th2 = int(hth * 0.38)
+            tp_f  = (cx,       cy - wh + th2)
+            tp_l  = (cx - tw2, cy - wh)
+            tp_r  = (cx + tw2, cy - wh)
+            tp_b  = (cx,       cy - wh - th2)
+            th_h  = max(5, int(12 * z))
+            poly(_dk(wl, 0.88), [tp_l, tp_f, up(tp_f,th_h), up(tp_l,th_h)])
+            poly(_dk(wr, 0.88), [tp_r, tp_f, up(tp_f,th_h), up(tp_r,th_h)])
+            poly(_dk(wt, 1.05), [up(tp_l,th_h), up(tp_f,th_h), up(tp_r,th_h), up(tp_b,th_h)])
+            # Toit de la tour
+            pk_t = ip((cx, cy - wh - th_h - max(3, int(6*z))))
+            poly(rf, [ip(up(tp_l,th_h)), ip(up(tp_f,th_h)), pk_t])
+            poly(rs, [ip(up(tp_r,th_h)), ip(up(tp_f,th_h)), pk_t])
+        return
+
+    # ── Level 4: grande cité ──────────────────────────────────────────────
+    if level == 4:
+        wh = max(14, int(28 * z))
+        box(wh, wl, wr, wt, ol)
+
+        if ei <= 3:
+            # Acropole / forum colonnade
+            battlement(wh, max(2, int(5*z)), _dk(wl,1.15))
+            if z >= 0.6:
+                for t in [0.1, 0.3, 0.5, 0.7, 0.9]:
+                    col_pt = lrp(pl, pf, t)
+                    pygame.draw.line(surface, _dk(wl,1.25), ip(col_pt),
+                        ip((col_pt[0], col_pt[1]-wh)), max(1, int(z*0.8)))
+                    col_pt_r = lrp(pr, pf, t)
+                    pygame.draw.line(surface, _dk(wr,1.25), ip(col_pt_r),
+                        ip((col_pt_r[0], col_pt_r[1]-wh)), max(1, int(z*0.8)))
+        elif ei == 4:
+            # Cathédrale / château fort
+            battlement(wh, max(2, int(5*z)), _dk(wl,1.1))
+            if z >= 0.5:
+                # Grande tour centrale
+                btw = int(htw * 0.45); bth = int(hth * 0.45)
+                bp_f = (cx, cy - wh + bth); bp_l = (cx-btw, cy-wh); bp_r = (cx+btw, cy-wh); bp_b=(cx,cy-wh-bth)
+                bh2 = max(8, int(20*z))
+                poly(_dk(wl,.85), [bp_l,bp_f,up(bp_f,bh2),up(bp_l,bh2)])
+                poly(_dk(wr,.85), [bp_r,bp_f,up(bp_f,bh2),up(bp_r,bh2)])
+                poly(_dk(wt,1.05),[up(bp_l,bh2),up(bp_f,bh2),up(bp_r,bh2),up(bp_b,bh2)])
+                battlement(wh+bh2, max(2,int(3*z)), _dk(wl,1.2))
+        elif ei == 5:
+            # Palais Renaissance
+            hip_roof(wh, max(5,int(10*z)), rf, rs, _dk(ol,0.75))
+        elif ei == 6:
+            # Usine / complexe industriel
+            poly((48,46,42), [up(pl,wh), up(pf,wh), up(pr,wh), up(pb,wh)])
+            for ch_t in [0.25, 0.65]:
+                ch_pt = lrp(up(pl,wh), up(pr,wh), ch_t)
+                ch_h  = max(5, int(16*z)); ch_w = max(1, int(3*z))
+                pygame.draw.rect(surface, (72,68,64),
+                    (int(ch_pt[0])-ch_w//2, int(ch_pt[1])-ch_h, ch_w, ch_h))
+                smoke_x = int(ch_pt[0]) + int(math.sin(tick*1.8+ch_t*3)*z)
+                smoke_y = int(ch_pt[1]) - ch_h - int(math.sin(tick*1.2)*2)
+                pygame.draw.circle(surface, (88,85,82), (smoke_x, smoke_y), max(2,int(3.5*z)))
+        else:
+            # Tour moderne / futuriste
+            poly(rf, [up(pl,wh), up(pf,wh), up(pr,wh), up(pb,wh)])
+
+        # Grille de fenêtres sur toute la hauteur
+        if z >= 0.45:
+            for row_frac in [0.12, 0.32, 0.52, 0.72, 0.88]:
+                wh_r = int(wh * row_frac)
+                for tx in [0.12, 0.35, 0.60, 0.83]:
+                    win_face(pl, pf, up(pl,wh_r+int(3.5*z)), up(pf,wh_r+int(3.5*z)),
+                             tx, 0.05, 0.14, 0.90, wn)
+                    win_face(pr, pf, up(pr,wh_r+int(3.5*z)), up(pf,wh_r+int(3.5*z)),
+                             tx, 0.05, 0.14, 0.90, wn)
+        return
+
+    # ── Level 5: mégapole / futur ─────────────────────────────────────────
+    if level == 5:
+        wh = max(20, int(46 * z))
+
+        if ei >= 9:
+            # Cité cristalline lumineuse
+            pulse = (math.sin(tick * 1.4 + gx * 0.4) + 1) * 0.5
+            glow  = (int(28+pulse*28), int(55+pulse*45), int(165+pulse*45))
+            box(wh, _dk(glow,0.65), glow, (min(255,int(glow[0]*1.4)),min(255,int(glow[1]*1.4)),255),
+                (72,112,200))
+            # Anneau d'énergie
+            if z >= 0.5:
+                for rr in [int(htw*0.55), int(htw*0.85), int(htw*1.1)]:
+                    ey = cy - wh - int(rr * 0.35)
+                    pygame.draw.ellipse(surface, (55,115,218,0),
+                        (cx-rr, ey-rr//4, rr*2, rr//2), max(1,int(z)))
+            # Flèche lumineuse
+            spire = max(8, int(20*z))
+            pk = ip((cx, cy-wh-spire))
+            poly((168,218,255), [ip(up(pl,wh)), ip(up(pf,wh)), pk])
+            poly((120,168,232), [ip(up(pr,wh)), ip(up(pf,wh)), pk])
+            glow_r = max(3, int(5*z))
+            pygame.draw.circle(surface, (200,232,255), ip((cx, cy-wh-spire)), glow_r)
+            pygame.draw.circle(surface, (255,255,255), ip((cx, cy-wh-spire)), max(1,glow_r-2))
+        elif ei >= 7:
+            # Gratte-ciel moderne
+            box(wh, wl, wr, wt, ol)
+            poly(rf, [up(pl,wh), up(pf,wh), up(pr,wh), up(pb,wh)])
+            # Antenne
+            ant_h = max(5, int(14*z))
+            pygame.draw.line(surface, _dk(wl,1.2),
+                ip((cx, cy-wh)), ip((cx, cy-wh-ant_h)), max(1,int(z*0.8)))
+            pygame.draw.circle(surface, wn, ip((cx, cy-wh-ant_h)), max(1,int(z*1.2)))
+            # Grille fenêtres dense
+            if z >= 0.4:
+                for rf_ in [0.08,0.18,0.28,0.38,0.48,0.58,0.68,0.78,0.90]:
+                    wh_r = int(wh*rf_)
+                    for tx in [0.1,0.28,0.48,0.68,0.88]:
+                        win_face(pl,pf,up(pl,wh_r+int(3*z)),up(pf,wh_r+int(3*z)),tx,0.05,0.12,0.90,wn)
+                        win_face(pr,pf,up(pr,wh_r+int(3*z)),up(pf,wh_r+int(3*z)),tx,0.05,0.12,0.90,wn)
+        elif ei == 6:
+            # Complexe industriel massif
+            box(wh, wl, wr, wt, ol)
+            poly((45,42,38), [up(pl,wh), up(pf,wh), up(pr,wh), up(pb,wh)])
+            for ch_t, ch_mult in [(0.2,1.0),(0.5,1.3),(0.8,1.0)]:
+                ch_h = max(6, int(22*z*ch_mult)); ch_w = max(2, int(4*z))
+                ch_pt = lrp(up(pl,wh), up(pr,wh), ch_t)
+                pygame.draw.rect(surface, (65,60,55),
+                    (int(ch_pt[0])-ch_w//2, int(ch_pt[1])-ch_h, ch_w, ch_h))
+                sx_, sy_ = int(ch_pt[0])+int(math.sin(tick*1.5+ch_t*4)*z*0.8), int(ch_pt[1])-ch_h
+                pygame.draw.circle(surface, (92,88,84),(sx_,sy_-int(3*z)), max(2,int(4*z)))
+            if z >= 0.45:
+                for rf_ in [0.15,0.40,0.65,0.85]:
+                    wh_r = int(wh*rf_)
+                    for tx in [0.1,0.35,0.65,0.9]:
+                        win_face(pl,pf,up(pl,wh_r+int(4*z)),up(pf,wh_r+int(4*z)),tx,0.05,0.15,0.90,wn)
+                        win_face(pr,pf,up(pr,wh_r+int(4*z)),up(pf,wh_r+int(4*z)),tx,0.05,0.15,0.90,wn)
+        else:
+            # Citadelle / acropole / cathédrale monumentale
+            box(wh, wl, wr, wt, ol)
+            battlement(wh, max(2, int(5*z)), _dk(wl,1.15))
+            if z >= 0.45:
+                # Tour centrale massive
+                tw3 = int(htw * 0.52); th3 = int(hth * 0.52)
+                tp3_f=(cx,cy-wh+th3); tp3_l=(cx-tw3,cy-wh); tp3_r=(cx+tw3,cy-wh); tp3_b=(cx,cy-wh-th3)
+                th3_h = max(10, int(28*z))
+                poly(_dk(wl,.82),[tp3_l,tp3_f,up(tp3_f,th3_h),up(tp3_l,th3_h)])
+                poly(_dk(wr,.82),[tp3_r,tp3_f,up(tp3_f,th3_h),up(tp3_r,th3_h)])
+                poly(_dk(wt,1.08),[up(tp3_l,th3_h),up(tp3_f,th3_h),up(tp3_r,th3_h),up(tp3_b,th3_h)])
+                battlement(wh+th3_h, max(2,int(3*z)), _dk(wl,1.25))
+                pk3 = ip((cx, cy-wh-th3_h-max(5,int(12*z))))
+                poly(rf, [ip(up(tp3_l,th3_h)), ip(up(tp3_f,th3_h)), pk3])
+                poly(rs, [ip(up(tp3_r,th3_h)), ip(up(tp3_f,th3_h)), pk3])
+            if z >= 0.45:
+                for rf_ in [0.15,0.40,0.68]:
+                    wh_r = int(wh*rf_)
+                    for tx in [0.1,0.35,0.65,0.9]:
+                        win_face(pl,pf,up(pl,wh_r+int(3*z)),up(pf,wh_r+int(3*z)),tx,0.05,0.14,0.90,wn)
+                        win_face(pr,pf,up(pr,wh_r+int(3*z)),up(pf,wh_r+int(3*z)),tx,0.05,0.14,0.90,wn)
+
+
+def _draw_construction_site(surface, gx, gy, progress, cam_x, cam_y, zoom):
+    """Scaffolding for in-progress build sites (progress 0-7 wood deposited)."""
+    cx, cy = world_to_screen(gx + 0.5, gy + 0.5, cam_x, cam_y, zoom)
+    cy -= int(TILE_HEIGHTS.get(3, 6) * zoom) + 2
+    if cx < -60 or cx > SCREEN_W + 60 or cy > SCREEN_H + 60: return
+    z = zoom
+    htw = TILE_W * z / 2
+    hth = TILE_H * z / 2
+    pf = (cx, cy + hth); pl = (cx - htw, cy); pr = (cx + htw, cy)
+
+    frac   = min(1.0, progress / 8.0)
+    site_h = max(2, int(frac * 14 * z))
+    if site_h < 1: return
+
+    # Foundation stones
+    pygame.draw.polygon(surface, (110,98,82),
+        [(int(pl[0]),int(pl[1])), (int(pf[0]),int(pf[1])),
+         (int(pr[0]),int(pr[1])), (int(cx),int(cy-hth))])
+    # Partial walls
+    if frac > 0.1:
+        pygame.draw.polygon(surface, (132,118,95),
+            [int_pt(pl), int_pt(pf), int_pt((pf[0],pf[1]-site_h)), int_pt((pl[0],pl[1]-site_h))])
+    # Scaffolding poles
+    if z >= 0.55:
+        sc = (175, 148, 98)
+        for t in [0.2, 0.6, 0.9]:
+            pt = (int(pl[0]+(pf[0]-pl[0])*t), int(pl[1]+(pf[1]-pl[1])*t))
+            pygame.draw.line(surface, sc, pt, (pt[0], pt[1]-site_h-int(3*z)), max(1,int(z*0.7)))
+        pygame.draw.line(surface, sc,
+            (int(pl[0]),int(pl[1]-site_h)), (int(pf[0]),int(pf[1]-site_h)),
+            max(1, int(z*0.7)))
+    # Progress indicator
+    if z >= 0.7:
+        bar_w = max(4, int(htw))
+        bar_h = max(2, int(3*z))
+        bx = cx - bar_w//2; by = int(cy - hth - int(8*z))
+        pygame.draw.rect(surface, (50,40,30), (bx, by, bar_w, bar_h))
+        pygame.draw.rect(surface, (185,148,55), (bx, by, int(bar_w*frac), bar_h))
+
+
+def int_pt(p): return (int(p[0]), int(p[1]))
 
 
 # ───────────────────────────── character rendering ───────────────────────────
@@ -671,6 +1054,10 @@ def render(surface, sim, tiles, camera, fonts, tick, selected_entity=None):
     # ── roads (drawn under buildings so buildings overlap them) ──
     for s in sim.settlements:
         _draw_settlement_roads(surface, s, cam_x, cam_y, zoom)
+
+    # ── construction sites (scaffolding for in-progress buildings) ──
+    for (bx, by), wood in sim._build_progress.items():
+        _draw_construction_site(surface, bx, by, wood, cam_x, cam_y, zoom)
 
     # ── buildings in diagonal painter-algorithm order ──
     for diag in range(WORLD_W + WORLD_H - 1):
