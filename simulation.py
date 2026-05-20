@@ -214,9 +214,10 @@ class Settlement:
 # ── Simulation ────────────────────────────────────────────────────────────
 
 class Simulation:
-    def __init__(self, tiles, epoch=False):
+    def __init__(self, tiles, epoch=False, rivers=None):
         self.tiles   = tiles
         self.epoch   = epoch
+        self.rivers  = rivers or []
         self.paused  = False
         self.speed_idx  = DEFAULT_SPEED_IDX
         self._era_idx   = 0

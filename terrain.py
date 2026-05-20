@@ -104,6 +104,62 @@ def finalize_terrain(height_map, moisture_map):
     return tiles, height_map, moisture_map
 
 
+# ── River generation ──────────────────────────────────────────────────────
+
+def generate_rivers(tiles, height_map, seed=42):
+    """Trace rivers from highland sources downhill to water.
+    Returns a list of paths; each path is a list of (x, y) tile coords."""
+    rng   = random.Random(seed ^ 0xCAFE_BABE)
+    WATER = {T_DEEP_WATER, T_WATER}
+    HIGH  = {T_MOUNTAIN, T_SNOW, T_HIGHLAND}
+
+    sources = [(x, y) for x in range(2, WORLD_W - 2)
+                       for y in range(2, WORLD_H - 2)
+                       if tiles[x][y] in HIGH]
+    rng.shuffle(sources)
+
+    river_paths = []
+    used_tiles  = set()
+
+    for sx, sy in sources:
+        if len(river_paths) >= 8:
+            break
+        if (sx, sy) in used_tiles:
+            continue
+
+        path    = []
+        visited = set()
+        cx, cy  = sx, sy
+
+        for _ in range(180):
+            if (cx, cy) in visited:
+                break
+            visited.add((cx, cy))
+            path.append((cx, cy))
+            if tiles[cx][cy] in WATER:
+                break
+
+            nbrs = []
+            for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                nx2, ny2 = cx + dx, cy + dy
+                if 0 <= nx2 < WORLD_W and 0 <= ny2 < WORLD_H and (nx2, ny2) not in visited:
+                    nbrs.append((height_map[nx2][ny2], nx2, ny2))
+            if not nbrs:
+                break
+
+            nbrs.sort()
+            min_h = nbrs[0][0]
+            low   = [(h, nx2, ny2) for h, nx2, ny2 in nbrs if h <= min_h + 0.04]
+            _, cx, cy = rng.choice(low)
+
+        if len(path) >= 7 and tiles[path[-1][0]][path[-1][1]] in WATER:
+            for p in path:
+                used_tiles.add(p)
+            river_paths.append(path)
+
+    return river_paths
+
+
 # ── Legacy sync wrapper (desktop / tests) ────────────────────────────────
 
 def generate_terrain(seed=42):

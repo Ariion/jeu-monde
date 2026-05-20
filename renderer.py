@@ -1009,6 +1009,138 @@ def _draw_settlement_labels(surface, settlements, era_idx, cam_x, cam_y, zoom, f
                                  label_y + name_s.get_height() + 2))
 
 
+# ───────────────────────── rivers / roads / caravans / boats ─────────────────
+
+def _draw_rivers(surface, rivers, cam_x, cam_y, zoom):
+    """Blue river lines flowing from mountains to sea."""
+    if not rivers or zoom < 0.22:
+        return
+    w     = max(1, int(2.5 * zoom))
+    col   = (65, 115, 210)
+    col_d = (40,  80, 160)
+    for path in rivers:
+        if len(path) < 2:
+            continue
+        pts = [world_to_screen(x + 0.5, y + 0.5, cam_x, cam_y, zoom) for x, y in path]
+        xs = [p[0] for p in pts]
+        if max(xs) < -10 or min(xs) > SCREEN_W + 10:
+            continue
+        if w >= 3:
+            pygame.draw.lines(surface, col_d, False, pts, w + 2)
+        pygame.draw.lines(surface, col, False, pts, max(1, w))
+
+
+def _draw_trade_routes(surface, settlements, era_idx, cam_x, cam_y, zoom, tick):
+    """Roads between nearby settlements + animated caravans/ships."""
+    if not settlements or zoom < 0.18:
+        return
+
+    # Road visual style per era
+    if era_idx <= 1:
+        road_col, road_w = (148, 118, 75), 1.5     # dirt track
+    elif era_idx <= 3:
+        road_col, road_w = (162, 145, 110), 2.0    # cobblestone
+    elif era_idx <= 6:
+        road_col, road_w = (175, 165, 148), 2.5    # paved road
+    elif era_idx <= 8:
+        road_col, road_w = (145, 145, 160), 3.0    # asphalt / highway
+    else:
+        road_col, road_w = (100, 210, 255), 2.5    # future hyperloop
+
+    rw = max(1, int(road_w * zoom))
+
+    # Connect settlements within proximity
+    n = len(settlements)
+    connected = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            a, b = settlements[i], settlements[j]
+            dist2 = (a.gx - b.gx) ** 2 + (a.gy - b.gy) ** 2
+            if dist2 < 30 ** 2 and (a.level >= 1 or b.level >= 1):
+                connected.append((a, b, math.sqrt(dist2)))
+
+    for a, b, dist in connected:
+        ax, ay = world_to_screen(a.gx + 0.5, a.gy + 0.5, cam_x, cam_y, zoom)
+        bx, by = world_to_screen(b.gx + 0.5, b.gy + 0.5, cam_x, cam_y, zoom)
+        if (ax < -20 and bx < -20) or (ax > SCREEN_W + 20 and bx > SCREEN_W + 20):
+            continue
+        pygame.draw.line(surface, road_col, (int(ax), int(ay)), (int(bx), int(by)), rw)
+
+        # Caravans (era 2+)
+        if era_idx >= 2 and zoom >= 0.30:
+            n_vans = 1 + min(a.level, b.level) // 2
+            speed  = 0.35 / max(1.0, dist * 0.06)
+            for k in range(n_vans):
+                t = (tick * speed + k / max(1, n_vans)) % 1.0
+                cx_f = ax + (bx - ax) * t
+                cy_f = ay + (by - ay) * t
+                r    = max(2, int(3.5 * zoom))
+                pygame.draw.circle(surface, (55, 45, 30),
+                                   (int(cx_f), int(cy_f)), r + 1)
+                pygame.draw.circle(surface, (210, 175, 90),
+                                   (int(cx_f), int(cy_f)), r)
+                if zoom >= 0.7 and r >= 3:
+                    pygame.draw.circle(surface, (245, 218, 140),
+                                       (int(cx_f), int(cy_f)), max(1, r - 1))
+
+
+def _draw_boats(surface, settlements, tiles, era_idx, cam_x, cam_y, zoom, tick):
+    """Animated boats near coastal settlements (era 2+)."""
+    if era_idx < 2 or zoom < 0.25 or not settlements:
+        return
+
+    WATER = {0, 1}  # T_DEEP_WATER, T_WATER
+
+    # Era-based boat colour
+    if era_idx <= 4:
+        hull  = (140, 100, 60)   # wooden galley
+        sail  = (220, 205, 175)
+    elif era_idx <= 7:
+        hull  = (80,  80,  90)   # iron/steel ship
+        sail  = (190, 190, 200)
+    else:
+        hull  = (50,  200, 240)  # futuristic craft
+        sail  = (180, 240, 255)
+
+    for s in settlements:
+        # Find water tile near this settlement
+        water_x = water_y = None
+        for dx in range(-6, 7):
+            for dy in range(-6, 7):
+                wx2, wy2 = s.gx + dx, s.gy + dy
+                if 0 <= wx2 < WORLD_W and 0 <= wy2 < WORLD_H:
+                    if tiles[wx2][wy2] in WATER:
+                        water_x, water_y = wx2, wy2
+                        break
+            if water_x is not None:
+                break
+        if water_x is None:
+            continue
+
+        # Animate boat in a small ellipse on the water
+        n_boats = 1 + s.level // 2
+        for k in range(min(n_boats, 3)):
+            angle = tick * 0.28 + k * (math.tau / max(1, n_boats))
+            bwx   = water_x + 0.5 + math.cos(angle) * 1.2
+            bwy   = water_y + 0.5 + math.sin(angle) * 0.7
+            sx2, sy2 = world_to_screen(bwx, bwy, cam_x, cam_y, zoom)
+            if sx2 < -10 or sx2 > SCREEN_W + 10:
+                continue
+            r = max(2, int(3.0 * zoom))
+            # Hull
+            pygame.draw.ellipse(surface, hull,
+                                (sx2 - r, sy2, r * 2, max(2, r)))
+            # Mast + sail (era <= 7, not futuristic)
+            if era_idx <= 7 and zoom >= 0.45 and r >= 3:
+                pygame.draw.line(surface, (80, 65, 48),
+                                 (sx2, sy2), (sx2, sy2 - r * 2), max(1, r // 2))
+                pygame.draw.polygon(surface, sail, [
+                    (sx2, sy2 - r * 2),
+                    (sx2 + r, sy2 - r),
+                    (sx2, sy2 - r // 2),
+                ])
+
+
 # ───────────────────────────── main render ───────────────────────────────────
 
 def render(surface, sim, tiles, camera, fonts, tick, selected_entity=None):
@@ -1041,6 +1173,12 @@ def render(surface, sim, tiles, camera, fonts, tick, selected_entity=None):
             gy = diag - gx
             _draw_tile(surface, gx, gy, tiles[gx][gy], cam_x, cam_y, zoom)
 
+    # ── rivers (on terrain, under buildings) ──
+    _draw_rivers(surface, sim.rivers, cam_x, cam_y, zoom)
+
+    # ── inter-settlement trade routes (under buildings) ──
+    _draw_trade_routes(surface, sim.settlements, era_idx, cam_x, cam_y, zoom, tick)
+
     # ── expand settlement layouts into per-tile building map ──
     building_map = {}   # (gx, gy) → (settlement, building_variant_level)
     for s in sim.settlements:
@@ -1051,7 +1189,7 @@ def render(surface, sim, tiles, camera, fonts, tick, selected_entity=None):
             if (bx, by) not in building_map:
                 building_map[(bx, by)] = (s, blvl)
 
-    # ── roads (drawn under buildings so buildings overlap them) ──
+    # ── intra-settlement roads (drawn under buildings) ──
     for s in sim.settlements:
         _draw_settlement_roads(surface, s, cam_x, cam_y, zoom)
 
@@ -1091,6 +1229,9 @@ def render(surface, sim, tiles, camera, fonts, tick, selected_entity=None):
                                      (sx - stump_r, sy), (sx + stump_r, sy), lw)
                     pygame.draw.line(surface, (75, 52, 28),
                                      (sx, sy - stump_r), (sx, sy + stump_r), lw)
+
+    # ── boats near coastal settlements ──
+    _draw_boats(surface, sim.settlements, tiles, era_idx, cam_x, cam_y, zoom, tick)
 
     # ── prey ──
     for p in sim.prey:

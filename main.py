@@ -2,7 +2,7 @@ import sys
 import asyncio
 import pygame
 from config import SCREEN_W, SCREEN_H, FPS, WORLD_W, WORLD_H
-from terrain import build_noise_grids, compute_row, finalize_terrain
+from terrain import build_noise_grids, compute_row, finalize_terrain, generate_rivers
 from simulation import Simulation
 from renderer import Camera, render, find_nearest_entity
 import renderer as _pr
@@ -76,12 +76,17 @@ async def generate_world_async(screen, fonts, seed=42):
     _draw_loading(screen, fonts, "Application du masque île…", 72)
     await asyncio.sleep(0)
 
-    tiles, _, _ = finalize_terrain(height_map, moisture_map)
+    tiles, height_map_norm, _ = finalize_terrain(height_map, moisture_map)
+
+    _draw_loading(screen, fonts, "Tracé des rivières…", 76)
+    await asyncio.sleep(0)
+
+    rivers = generate_rivers(tiles, height_map_norm, seed=seed)
 
     _draw_loading(screen, fonts, "Peuplement du monde…", 82)
     await asyncio.sleep(0)
 
-    return tiles
+    return tiles, rivers
 
 
 async def main():
@@ -94,12 +99,12 @@ async def main():
     clock  = pygame.time.Clock()
     fonts  = make_fonts()
 
-    tiles = await generate_world_async(screen, fonts, seed=42)
+    tiles, rivers = await generate_world_async(screen, fonts, seed=42)
 
     _draw_loading(screen, fonts, "Initialisation de la simulation…", 90)
     await asyncio.sleep(0)
 
-    sim = Simulation(tiles, epoch=IS_WEB)
+    sim = Simulation(tiles, epoch=IS_WEB, rivers=rivers)
 
     _draw_loading(screen, fonts, "Construction du rendu 3D…" if USE_GL else "Prêt !", 96)
     await asyncio.sleep(0)
