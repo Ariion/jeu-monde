@@ -5,6 +5,7 @@ from config import SCREEN_W, SCREEN_H, FPS, WORLD_W, WORLD_H
 from terrain import build_noise_grids, compute_row, finalize_terrain
 from simulation import Simulation
 from renderer import Camera, render, find_nearest_entity
+import renderer as _pr
 
 IS_WEB = sys.platform == "emscripten"
 
@@ -103,25 +104,14 @@ async def main():
     _draw_loading(screen, fonts, "Construction du rendu 3D…" if USE_GL else "Prêt !", 96)
     await asyncio.sleep(0)
 
-    # ── Phase 2: switch to OpenGL display (desktop only) ──────────────────────
+    # ── Phase 2: create standalone GL context (no display mode change needed) ──
     gl_renderer = None
     if USE_GL:
-        pygame.display.quit()
-        pygame.display.init()
-        screen = pygame.display.set_mode(
-            (SCREEN_W, SCREEN_H),
-            pygame.OPENGL | pygame.DOUBLEBUF,
-        )
-        pygame.display.set_caption("Jeu Monde — L'Évolution de l'Humanité")
         try:
-            ctx = moderngl.create_context()
+            ctx = moderngl.create_context(standalone=True)
             gl_renderer = GLRenderer(ctx, tiles)
         except Exception as e:
             print(f"[renderer] GL context failed ({e}), falling back to pygame")
-            gl_renderer = None
-            pygame.display.quit()
-            pygame.display.init()
-            screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
 
     camera = Camera()
     tick   = 0.0
@@ -175,7 +165,15 @@ async def main():
         sim.update(dt)
 
         if gl_renderer is not None:
-            gl_renderer.render(sim, camera, tick, fonts, selected_entity)
+            surf = gl_renderer.render_to_surface(sim, camera, tick)
+            screen.blit(surf, (0, 0))
+            era_idx, era = sim.get_era()
+            _pr._draw_settlement_labels(
+                screen, sim.settlements, era_idx,
+                camera.x, camera.y, camera.zoom, fonts)
+            _pr._draw_ui(screen, sim, era_idx, era, fonts, camera.zoom)
+            if selected_entity is not None:
+                _pr._draw_info_panel(screen, selected_entity, era_idx, sim.year, fonts)
         else:
             render(screen, sim, tiles, camera, fonts, tick, selected_entity)
 
